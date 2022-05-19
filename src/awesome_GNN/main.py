@@ -1,2 +1,1 @@
-# https://medium.com/@stepanulyanin/implementing-grad-cam-in-pytorch-ea0937c31e82
-
+# https://pythonlang.dev/repo/jacobgil-pytorch-grad-cam/
