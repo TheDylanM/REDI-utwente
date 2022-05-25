@@ -1,10 +1,11 @@
 
 - [ ] come up with distractor loss functions 
-- [ ] define interesting distractor internal architecture
+- [x] define interesting distractor internal architecture
 - [x] write pseudocode
-- [ ] pick initial dataset
+- [x] pick initial dataset
 - [ ] describe dataset
 - [ ] implement pseudocode
+- [ ] define assessment method for heatmaps
 
 ## define distractor internal architecture(s)
 ### input parameters
