@@ -3,9 +3,17 @@
 - [x] define interesting distractor internal architecture
 - [x] write pseudocode
 - [x] pick initial dataset
-- [ ] describe dataset
 - [ ] implement pseudocode
-- [ ] define assessment method for heatmaps
+- [ ] define assessment method for heatmaps (aside from distractor loss function)
+- [ ] describe dataset
+        - [ ] total sample count
+        - [ ] classes, class distribution
+        - [ ] colour distribution...?
+
+## Distractor loss functions
+- standard deviation of the resulting heatmap
+- variance of the resulting heatmap
+- ...? think of more
 
 ## define distractor internal architecture(s)
 ### input parameters
