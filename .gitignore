@@ -1,4 +1,6 @@
 ./venv/
+/test notebooks/.ipynb_checkpoints
+/test notebooks/data
 test notebooks/data
 test notebooks/.ipynb_checkpoints/
 data/*
