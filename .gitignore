@@ -1,6 +1,6 @@
 ./venv/
 test notebooks/data
 test notebooks/.ipynb_checkpoints/
-./data/*
-!./data/README.md
+data/*
+!data/README.md
 .idea
