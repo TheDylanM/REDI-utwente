@@ -6,9 +6,24 @@
 - [ ] implement pseudocode
 - [ ] define assessment method for heatmaps (aside from distractor loss function)
 - [ ] describe dataset
-        - [ ] total sample count
-        - [ ] classes, class distribution
-        - [ ] colour distribution...?
+  - [ ] total sample count
+  - [ ] classes, class distribution
+  - [ ] colour distribution...?
+
+TODO Implementations:
+- [ ] Preperations
+  - [ ] Import datasets (Stanford Cars and FGVC-Aircraft)
+  - [ ] Finetuning models (ResNet-50 and VGG16)
+  - [ ] Generating and saving attention maps
+
+- [ ] Distractor (in PyTorch)
+  - [ ] Architecture
+  - [ ] Training
+
+- [ ] Retraining FT-models
+  - [ ] 
+  - [ ] 
+
 
 ## Distractor loss functions
 - standard deviation of the resulting heatmap

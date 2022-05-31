@@ -1,3 +1,6 @@
 ./venv/
 /test notebooks/.ipynb_checkpoints
 /test notebooks/data
+/data/*
+!/data/README.md
+*.DS_Store
