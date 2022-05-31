@@ -19,6 +19,7 @@ CLASSIFIER_NAME = 'resnet'
 CLASSIFIER_INPUT_SIZE = None
 BATCH_SIZE = 8
 NUM_EPOCHS = 15
+NUM_CLASSES = 0
 FEATURE_EXTRACT = True
 LR = 0.001
 MOMENTUM = 0.9
@@ -95,7 +96,8 @@ def set_parameter_requires_grad(model, feature_extracting):
             param.requires_grad = False
 
 
-def initialize_model(num_classes, use_pretrained=True):
+def initialize_model(use_pretrained=True):
+    num_classes = NUM_CLASSES
     feature_extract = FEATURE_EXTRACT
     # Initialize these variables which will be set in this if statement. Each of these
     #   variables is model specific.
