@@ -53,7 +53,7 @@ def dataset_path():
     return os.path.join(data_path(), dataset_folders()[DATASET])
 
 
-def data_transforms():
+def get_data_transforms():
     # todo if relevant: adapt this per dataset?
     return {
         'train': transforms.Compose([
@@ -71,18 +71,18 @@ def data_transforms():
     }
 
 
-def dataset():
+def get_dataset():
     # assumes a path pointing to a set of folders representing classes, and the samples within those
     # classes to be in their respective folders
-    tforms = data_transforms()
+    tforms = get_data_transforms()
     dataset = {}
     for x in ['train', 'val']:
         dataset[x] = datasets.ImageFolder(os.path.join(dataset_path(), x), tforms[x])
     return dataset
 
 
-def dataloaders():
-    ds = dataset()
+def get_dataloaders():
+    ds = get_dataset()
     dataloaders = {}
     for x in ['train', 'val']:
         dataloaders[x] = torch.utils.data.DataLoader(ds[x], batch_size=BATCH_SIZE, shuffle=True, num_workers=4)
@@ -230,8 +230,8 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
                 running_loss += loss.item() * inputs.size(0)
                 running_corrects += torch.sum(preds == labels.data)
 
-            epoch_loss = running_loss / len(dataloaders[phase].dataset)
-            epoch_acc = running_corrects.double() / len(dataloaders[phase].dataset)
+            epoch_loss = running_loss / len(dataloaders[phase].get_dataset)
+            epoch_acc = running_corrects.double() / len(dataloaders[phase].get_dataset)
 
             print('{} Loss: {:.4f} Acc: {:.4f}'.format(phase, epoch_loss, epoch_acc))
 
@@ -278,5 +278,5 @@ def finetune_model(model):
     # todo: choose a different optimizer?
     optimizer = optim.SGD(params_to_update, lr=LR, momentum=MOMENTUM)
     criterion = nn.CrossEntropyLoss()
-    model, hist = train_model(model, dataloaders(), criterion, optimizer, num_epochs=NUM_EPOCHS, is_inception=is_inception())
+    model, hist = train_model(model, get_dataloaders(), criterion, optimizer, num_epochs=NUM_EPOCHS, is_inception=is_inception())
     return model, hist
