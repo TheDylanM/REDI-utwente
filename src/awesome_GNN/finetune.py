@@ -170,6 +170,7 @@ def initialize_model(use_pretrained=True):
         exit()
     global CLASSIFIER_INPUT_SIZE
     CLASSIFIER_INPUT_SIZE = input_size
+    model_ft.to(device)
     return model_ft
 
 def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_inception=False):
@@ -254,7 +255,6 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
 
 
 def finetune_model(model):
-    model = model.to(device)
     # Gather the parameters to be optimized/updated in this run. If we are
     #  finetuning we will be updating all parameters. However, if we are
     #  doing feature extract method, we will only update the parameters
