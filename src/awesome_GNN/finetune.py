@@ -53,7 +53,7 @@ def dataset_path():
     return os.path.join(data_path(), dataset_folders()[DATASET])
 
 
-def data_transforms():
+def get_data_transforms():
     # todo if relevant: adapt this per dataset?
     return {
         'train': transforms.Compose([
@@ -71,18 +71,18 @@ def data_transforms():
     }
 
 
-def dataset():
+def get_dataset():
     # assumes a path pointing to a set of folders representing classes, and the samples within those
     # classes to be in their respective folders
-    tforms = data_transforms()
+    tforms = get_data_transforms()
     dataset = {}
     for x in ['train', 'val']:
         dataset[x] = datasets.ImageFolder(os.path.join(dataset_path(), x), tforms[x])
     return dataset
 
 
-def dataloaders():
-    ds = dataset()
+def get_dataloaders():
+    ds = get_dataset()
     dataloaders = {}
     for x in ['train', 'val']:
         dataloaders[x] = torch.utils.data.DataLoader(ds[x], batch_size=BATCH_SIZE, shuffle=True, num_workers=4)
@@ -170,6 +170,7 @@ def initialize_model(use_pretrained=True):
         exit()
     global CLASSIFIER_INPUT_SIZE
     CLASSIFIER_INPUT_SIZE = input_size
+    model_ft.to(device)
     return model_ft
 
 def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_inception=False):
@@ -254,7 +255,6 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
 
 
 def finetune_model(model):
-    model = model.to(device)
     # Gather the parameters to be optimized/updated in this run. If we are
     #  finetuning we will be updating all parameters. However, if we are
     #  doing feature extract method, we will only update the parameters
@@ -278,5 +278,5 @@ def finetune_model(model):
     # todo: choose a different optimizer?
     optimizer = optim.SGD(params_to_update, lr=LR, momentum=MOMENTUM)
     criterion = nn.CrossEntropyLoss()
-    model, hist = train_model(model, dataloaders(), criterion, optimizer, num_epochs=NUM_EPOCHS, is_inception=is_inception())
+    model, hist = train_model(model, get_dataloaders(), criterion, optimizer, num_epochs=NUM_EPOCHS, is_inception=is_inception())
     return model, hist
