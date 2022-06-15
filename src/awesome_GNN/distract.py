@@ -17,13 +17,19 @@ import tqdm
 
 import finetune
 
+# hyperparameters
+DISTRACTOR_LR = finetune.LR
+DISTRACTOR_MOMENTUM = finetune.MOMENTUM
+DISTRACTOR_NUM_EPOCHS = 5
 
+# grad cam reimplemented with torch tensors, instead of numpy ndarrays, to allow for backpropagation
 def scale_cam_image(cam: torch.Tensor, target_size=None) -> torch.Tensor:
     cam = cam - torch.min(cam, 0).values
     cam = cam / (1e-7 + torch.max(cam, 0).values)
     if target_size is not None:
         cam = torchvision.transforms.functional.resize(cam, target_size)
     return cam
+
 
 def get_2d_projection(activation_batch):
     # TBD: use pytorch batch svd implementation
@@ -35,12 +41,13 @@ def get_2d_projection(activation_batch):
         # Centering before the SVD seems to be important here,
         # Otherwise the image returned is negative
         reshaped_activations = reshaped_activations - \
-            reshaped_activations.mean(0)
+                               reshaped_activations.mean(0)
         U, S, VT = torch.linalg.svd(reshaped_activations, full_matrices=True)
         projection = reshaped_activations @ VT[0, :]
         projection = projection.reshape(activations.shape[1:])
         projections.append(projection.unsqueeze(0))
     return torch.cat(projections)
+
 
 class TensorGradCAM(GradCAM):
     def get_cam_weights(self,
@@ -120,15 +127,25 @@ class Distractor(torch.nn.Module):
         x = functional.softsign(x)
         return x
 
-# class GumbelDistractor(torch.nn.Module):
-#     def __init__(self):
-#         super().__init__()
-#         self.cnn
+
+class GumbelDistractor(torch.nn.Module):
+    def __init__(self, n_layers=1):
+        super().__init__()
+        self.cnns = torch.nn.ModuleList(
+            [torch.nn.Conv2d(1, 1, kernel_size=3, stride=1, padding=1) for _ in range(n_layers)])
+
+    def forward(self, x):
+        for cnn in self.cnns:
+            x = cnn(x)
+        x_soft = x
+        x_hard = ((x > 0) * 1 - (x <= 0) * 1 + 1) / 2
+        x_gumbel = x_hard - x_soft.detach() + x_soft
+        return x_gumbel
 
 
 def get_target_layers(classifier):
     target_layers = []
-    if type(classifier) == models.ResNet: # todo: more models
+    if type(classifier) == models.ResNet:  # todo: more models
         target_layers = [classifier.layer4[-1]]
     return target_layers
 
@@ -146,18 +163,21 @@ def grad_cam_from_batch(classifier, batch):
 
 
 def initialize_distractor(classifier):
-    distractor = Distractor()
+    # distractor = Distractor()
+    distractor = GumbelDistractor(n_layers=1)
     distractor.to(finetune.device)
     return distractor
 
+
 def avg(arr):
-    return sum(arr)/len(arr)
+    return sum(arr) / len(arr)
 
 
 def cam_avg_std(cam_batch):
     # calculates the average standard deviation of a batch of class activation mappings
     stds = torch.std(cam_batch, tuple(range(1, len(cam_batch.shape))))
-    return torch.sum(stds)/stds.nelement()
+    return torch.sum(stds) / stds.nelement()
+
 
 def train_distractor(distractor, classifier):
     # print(f'distractor: {distractor}')
@@ -168,9 +188,6 @@ def train_distractor(distractor, classifier):
     data_loaders = finetune.get_dataloaders()
 
     params_to_update = distractor.parameters()
-    DISTRACTOR_LR = 0.001
-    DISTRACTOR_MOMENTUM = finetune.MOMENTUM
-    DISTRACTOR_NUM_EPOCHS = 1
     optimizer = optim.SGD(params_to_update, lr=DISTRACTOR_LR, momentum=DISTRACTOR_MOMENTUM)
     criterion = cam_avg_std
 
@@ -184,7 +201,9 @@ def train_distractor(distractor, classifier):
             else:
                 distractor.eval()
             tqdm_obj = tqdm.tqdm(data_loaders[phase])
-            for batch in tqdm_obj:
+            description = f'epoch: {epoch}, phase: {phase}'
+            tqdm_obj.set_description(desc=description, refresh=False)
+            for i, batch in enumerate(tqdm_obj):
                 optimizer.zero_grad()
                 inputs, labels = batch
                 inputs = inputs.to(finetune.device)
@@ -200,10 +219,9 @@ def train_distractor(distractor, classifier):
 
                 baseline_loss_history[phase].append(baseline_loss)
                 distractor_loss_history[phase].append(distractor_loss)
-                k = 100
                 tqdm_obj.set_postfix({
-                    'running_avg_baseline_loss': avg(baseline_loss_history[phase][-k:]).item(),
-                    'running_avg_distractor_loss': avg(distractor_loss_history[phase][-k:]).item()
+                    'avg_baseline_loss': avg(baseline_loss_history[phase][-(i+1):]).item(),
+                    'avg_distractor_loss': avg(distractor_loss_history[phase][-(i+1):]).item()
                 })
                 if training:
                     distractor_loss.requires_grad = True
