@@ -7,9 +7,10 @@ from torchvision import datasets, models, transforms
 import time
 import os
 import copy
+import tqdm
 
 CLASSIFIER_OPTIONS = ['resnet', 'alexnet', 'vgg', 'squeezenet', 'densenet', 'inception']
-DATASET_OPTIONS = ['StanfordCars'] # todo: add options
+DATASET_OPTIONS = ['StanfordCars', 'FGVC-Aircraft']  # todo: add options
 
 DATA_PATH = '../../data'  # write to this variable when importing this module from different directory context than assumed here
 DATASET = 'StanfordCars'  # write to this variable if you wish to use another dataset
@@ -19,7 +20,7 @@ CLASSIFIER_NAME = 'resnet'
 CLASSIFIER_INPUT_SIZE = None
 BATCH_SIZE = 8
 NUM_EPOCHS = 15
-NUM_CLASSES = 0
+# NUM_CLASSES = 0
 FEATURE_EXTRACT = True
 LR = 0.001
 MOMENTUM = 0.9
@@ -28,7 +29,8 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 def print_hypers():
     # print hyperparameters
-    print(f'classifier input size: {CLASSIFIER_INPUT_SIZE}\nbatch size: {BATCH_SIZE}\nnum epochs: {NUM_EPOCHS}\nfeature extract: {FEATURE_EXTRACT}')
+    print(
+        f'classifier input size: {CLASSIFIER_INPUT_SIZE}\nbatch size: {BATCH_SIZE}\nnum epochs: {NUM_EPOCHS}\nfeature extract: {FEATURE_EXTRACT}')
 
 
 ###### getter functions
@@ -37,11 +39,13 @@ def is_inception():
     return CLASSIFIER_NAME == 'inception'
 
 
-def dataset_folders():
+def dataset_folder():
     return {
         'StanfordCars': os.path.join('StanfordCars', 'pytorch_structured_dataset'),
-        # 'FGVC-Aircrafts': None  # todo: define folder
-    }
+        'FGVC-Aircraft': os.path.join('FGVC-Aircraft', 'pytorch_structured_dataset'),
+        # if desirable, more datasets can be listed here
+    }[DATASET]
+
 
 def data_path():
     return DATA_PATH
@@ -50,7 +54,14 @@ def data_path():
 def dataset_path():
     if not DATASET in DATASET_OPTIONS:
         raise Exception(f'Invalid dataset name "{DATASET}".\nPlease use one of the following: {DATASET_OPTIONS}')
-    return os.path.join(data_path(), dataset_folders()[DATASET])
+    return os.path.join(data_path(), dataset_folder())
+
+
+def get_num_classes():
+    return {
+        'StanfordCars': 196,
+        'FGVC-Aircraft': 30,
+    }[DATASET]
 
 
 def get_data_transforms():
@@ -97,7 +108,7 @@ def set_parameter_requires_grad(model, feature_extracting):
 
 
 def initialize_model(use_pretrained=True):
-    num_classes = NUM_CLASSES
+    num_classes = get_num_classes()
     feature_extract = FEATURE_EXTRACT
     # Initialize these variables which will be set in this if statement. Each of these
     #   variables is model specific.
@@ -105,7 +116,8 @@ def initialize_model(use_pretrained=True):
     model_ft = None
     input_size = 0
     if not model_name in CLASSIFIER_OPTIONS:
-        raise Exception(f'Invalid classifier name "{model_name}".\nPlease use one of the following: {CLASSIFIER_OPTIONS}')
+        raise Exception(
+            f'Invalid classifier name "{model_name}".\nPlease use one of the following: {CLASSIFIER_OPTIONS}')
     if model_name == "resnet":
         """ Resnet18
         """
@@ -121,7 +133,7 @@ def initialize_model(use_pretrained=True):
         model_ft = models.alexnet(pretrained=use_pretrained)
         set_parameter_requires_grad(model_ft, feature_extract)
         num_ftrs = model_ft.classifier[6].in_features
-        model_ft.classifier[6] = nn.Linear(num_ftrs,num_classes)
+        model_ft.classifier[6] = nn.Linear(num_ftrs, num_classes)
         input_size = 224
 
     elif model_name == "vgg":
@@ -130,7 +142,7 @@ def initialize_model(use_pretrained=True):
         model_ft = models.vgg11_bn(pretrained=use_pretrained)
         set_parameter_requires_grad(model_ft, feature_extract)
         num_ftrs = model_ft.classifier[6].in_features
-        model_ft.classifier[6] = nn.Linear(num_ftrs,num_classes)
+        model_ft.classifier[6] = nn.Linear(num_ftrs, num_classes)
         input_size = 224
 
     elif model_name == "squeezenet":
@@ -138,7 +150,7 @@ def initialize_model(use_pretrained=True):
         """
         model_ft = models.squeezenet1_0(pretrained=use_pretrained)
         set_parameter_requires_grad(model_ft, feature_extract)
-        model_ft.classifier[1] = nn.Conv2d(512, num_classes, kernel_size=(1,1), stride=(1,1))
+        model_ft.classifier[1] = nn.Conv2d(512, num_classes, kernel_size=(1, 1), stride=(1, 1))
         model_ft.num_classes = num_classes
         input_size = 224
 
@@ -162,7 +174,7 @@ def initialize_model(use_pretrained=True):
         model_ft.AuxLogits.fc = nn.Linear(num_ftrs, num_classes)
         # Handle the primary net
         num_ftrs = model_ft.fc.in_features
-        model_ft.fc = nn.Linear(num_ftrs,num_classes)
+        model_ft.fc = nn.Linear(num_ftrs, num_classes)
         input_size = 299
 
     else:
@@ -172,6 +184,7 @@ def initialize_model(use_pretrained=True):
     CLASSIFIER_INPUT_SIZE = input_size
     model_ft.to(device)
     return model_ft
+
 
 def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_inception=False):
     since = time.time()
@@ -190,13 +203,13 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
             if phase == 'train':
                 model.train()  # Set model to training mode
             else:
-                model.eval()   # Set model to evaluate mode
+                model.eval()  # Set model to evaluate mode
 
             running_loss = 0.0
             running_corrects = 0
 
             # Iterate over data.
-            for inputs, labels in dataloaders[phase]:
+            for inputs, labels in tqdm.tqdm(dataloaders[phase]):
                 inputs = inputs.to(device)
                 labels = labels.to(device)
 
@@ -215,7 +228,7 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
                         outputs, aux_outputs = model(inputs)
                         loss1 = criterion(outputs, labels)
                         loss2 = criterion(aux_outputs, labels)
-                        loss = loss1 + 0.4*loss2
+                        loss = loss1 + 0.4 * loss2
                     else:
                         outputs = model(inputs)
                         loss = criterion(outputs, labels)
@@ -278,5 +291,6 @@ def finetune_model(model):
     # todo: choose a different optimizer?
     optimizer = optim.SGD(params_to_update, lr=LR, momentum=MOMENTUM)
     criterion = nn.CrossEntropyLoss()
-    model, hist = train_model(model, get_dataloaders(), criterion, optimizer, num_epochs=NUM_EPOCHS, is_inception=is_inception())
+    model, hist = train_model(model, get_dataloaders(), criterion, optimizer, num_epochs=NUM_EPOCHS,
+                              is_inception=is_inception())
     return model, hist

@@ -112,13 +112,18 @@ class Distractor(torch.nn.Module):
     def __init__(self):
         super().__init__()
         # todo: consider using a conv layer with 4 -> 3 channels, outputting rgb instead of mask
-        self.cnn = torch.nn.Conv2d(1,1, kernel_size=3, stride=1, padding=1)  # preserve dimensions
+        self.cnn = torch.nn.Conv2d(1, 1, kernel_size=3, stride=1, padding=1)  # preserve dimensions
 
     def forward(self, x):
         x = self.cnn(x)
         x = functional.relu(x)
         x = functional.softsign(x)
         return x
+
+# class GumbelDistractor(torch.nn.Module):
+#     def __init__(self):
+#         super().__init__()
+#         self.cnn
 
 
 def get_target_layers(classifier):
@@ -144,6 +149,9 @@ def initialize_distractor(classifier):
     distractor = Distractor()
     distractor.to(finetune.device)
     return distractor
+
+def avg(arr):
+    return sum(arr)/len(arr)
 
 
 def cam_avg_std(cam_batch):
@@ -175,15 +183,15 @@ def train_distractor(distractor, classifier):
                 distractor.train()
             else:
                 distractor.eval()
-            for batch in tqdm.tqdm(data_loaders[phase]):
-                # print(grad_cams.shape)
+            tqdm_obj = tqdm.tqdm(data_loaders[phase])
+            for batch in tqdm_obj:
                 optimizer.zero_grad()
                 inputs, labels = batch
                 inputs = inputs.to(finetune.device)
                 cams = grad_cam_from_batch(classifier, (inputs, labels))
                 predictions = classifier(inputs)
                 distractor_outputs = distractor(cams)
-                distracting_inputs = torch.multiply(inputs, 1 - distractor_outputs)  # todo: make sure dimensions work
+                distracting_inputs = torch.multiply(inputs, distractor_outputs)  # todo: make sure dimensions work
                 distracted_predictions = classifier(distracting_inputs)
                 distracted_cams = grad_cam_from_batch(classifier, (distracting_inputs, labels))
 
@@ -192,6 +200,11 @@ def train_distractor(distractor, classifier):
 
                 baseline_loss_history[phase].append(baseline_loss)
                 distractor_loss_history[phase].append(distractor_loss)
+                k = 100
+                tqdm_obj.set_postfix({
+                    'running_avg_baseline_loss': avg(baseline_loss_history[phase][-k:]).item(),
+                    'running_avg_distractor_loss': avg(distractor_loss_history[phase][-k:]).item()
+                })
                 if training:
                     distractor_loss.requires_grad = True
                     distractor_loss.backward()
