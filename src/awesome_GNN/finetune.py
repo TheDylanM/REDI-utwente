@@ -329,7 +329,7 @@ def load_checkpoint(path):
     pass
 
 
-def structure_checkpoints():
+def structure_checkpoints(_verbose=False):
     # Create directory structure for the finetuned models
     # The sub folders are based on the datasets
     main_folder = FINETUNED_MODELS_PATH
@@ -337,17 +337,17 @@ def structure_checkpoints():
     sub_sub_folders = CLASSIFIER_OPTIONS
 
     main_folder_path = os.path.join(main_folder)
-    safe_mkdir(main_folder_path)
+    safe_mkdir(main_folder_path, _verbose=_verbose)
 
     for sub_folder in sub_folders:
         sub_folder_path = os.path.join(main_folder_path, sub_folder)
-        safe_mkdir(sub_folder_path)
+        safe_mkdir(sub_folder_path, _verbose=_verbose)
         for sub_sub_folder in sub_sub_folders:
             sub_sub_folder_path = os.path.join(main_folder_path, sub_folder, sub_sub_folder)
-            safe_mkdir(sub_sub_folder_path)
+            safe_mkdir(sub_sub_folder_path, _verbose=_verbose)
 
 
-def safe_mkdir(path):
+def safe_mkdir(path, _verbose=False):
     if not os.path.exists(path):
         os.makedirs(path)
     else:
