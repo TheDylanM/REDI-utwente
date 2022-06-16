@@ -188,7 +188,8 @@ def initialize_model(model_name=CLASSIFIER_NAME, use_pretrained=True, _verbose=T
     return model_ft
 
 
-def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_inception=False):
+def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_inception=False, is_retrain=None):
+    # use is_retrain when loading from checkpoint, must be int of the last epoch
     since = time.time()
 
     val_acc_history = []
@@ -267,17 +268,21 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
     # load best model weights
     model.load_state_dict(best_model_wts)
 
+    e = num_epochs
+    if is_retrain:
+        e = num_epochs+is_retrain
+
     # This state dict is used for the saving/loading models
     state = {
         'name': CLASSIFIER_NAME,
-        'epochs': num_epochs,
+        'epochs': e,
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
     }
     return model, val_acc_history, state
 
 
-def finetune_model(model, optimizer_state_dict=None, _verbose=False):
+def finetune_model(model, optimizer_state_dict=None, _verbose=False, is_retrain=None):
     # Gather the parameters to be optimized/updated in this run. If we are
     #  finetuning we will be updating all parameters. However, if we are
     #  doing feature extract method, we will only update the parameters
@@ -311,7 +316,7 @@ def finetune_model(model, optimizer_state_dict=None, _verbose=False):
     criterion = nn.CrossEntropyLoss()
 
     model, hist, state = train_model(model, get_dataloaders(), criterion, optimizer, num_epochs=NUM_EPOCHS,
-                                     is_inception=is_inception())
+                                     is_inception=is_inception(), is_retrain=is_retrain)
     return model, hist, state
 
 
@@ -324,14 +329,14 @@ def load_checkpoint(path):
     pass
 
 
-def structure_checkpoints(global_path=DATA_PATH):
+def structure_checkpoints():
     # Create directory structure for the finetuned models
     # The sub folders are based on the datasets
-    main_folder = 'finetuned_models'
+    main_folder = FINETUNED_MODELS_PATH
     sub_folders = DATASET_OPTIONS
     sub_sub_folders = CLASSIFIER_OPTIONS
 
-    main_folder_path = os.path.join(global_path, main_folder)
+    main_folder_path = os.path.join(main_folder)
     safe_mkdir(main_folder_path)
 
     for sub_folder in sub_folders:
@@ -347,6 +352,11 @@ def safe_mkdir(path):
         os.makedirs(path)
     else:
         print('cannot safely create', path)
+
+
+def format_model_path(name, dataset, epoch):
+    path = os.path.join(FINETUNED_MODELS_PATH, dataset, name, '')
+    return path+str('{}_{}_E{}.pth'.format(name, dataset, epoch))
 
 
 def get_model_architecture(name, _verbose=False):
