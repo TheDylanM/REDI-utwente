@@ -109,7 +109,7 @@ def set_parameter_requires_grad(model, feature_extracting):
             param.requires_grad = False
 
 
-def initialize_model(model_name=CLASSIFIER_NAME, use_pretrained=True):
+def initialize_model(model_name=CLASSIFIER_NAME, use_pretrained=True, _verbose=True):
     num_classes = get_num_classes()
     feature_extract = FEATURE_EXTRACT
     # Initialize these variables which will be set in this if statement. Each of these
@@ -179,7 +179,8 @@ def initialize_model(model_name=CLASSIFIER_NAME, use_pretrained=True):
         input_size = 299
 
     else:
-        print("Invalid model name, exiting...")
+        if _verbose:
+            print("Invalid model name, exiting...")
         exit()
     global CLASSIFIER_INPUT_SIZE
     CLASSIFIER_INPUT_SIZE = input_size
@@ -265,10 +266,18 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
 
     # load best model weights
     model.load_state_dict(best_model_wts)
-    return model, val_acc_history, optimizer
+
+    # This state dict is used for the saving/loading models
+    state = {
+        'name': CLASSIFIER_NAME,
+        'epochs': num_epochs,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+    }
+    return model, val_acc_history, state
 
 
-def finetune_model(model, optimizer_state_dict=None):
+def finetune_model(model, optimizer_state_dict=None, _verbose=False):
     # Gather the parameters to be optimized/updated in this run. If we are
     #  finetuning we will be updating all parameters. However, if we are
     #  doing feature extract method, we will only update the parameters
@@ -278,17 +287,20 @@ def finetune_model(model, optimizer_state_dict=None):
     # only parameters with requires_grad are actually changed,
     # so if we are finetuning, we will be updating all parameters. if we are doing feature
     # extraction, we will only be updating certain parameters.
-    print("Params to learn:")
+    if _verbose:
+        print("Params to learn:")
     if FEATURE_EXTRACT:
         params_to_update = []
         for name, param in model.named_parameters():
             if param.requires_grad == True:
                 params_to_update.append(param)
-                print("\t", name)
+                if _verbose:
+                    print("\t", name)
     else:
         for name, param in model.named_parameters():
             if param.requires_grad == True:
-                print("\t", name)
+                if _verbose:
+                    print("\t", name)
 
     # todo: choose a different optimizer?
     optimizer = optim.SGD(params_to_update, lr=LR, momentum=MOMENTUM)
@@ -297,21 +309,45 @@ def finetune_model(model, optimizer_state_dict=None):
         optimizer.load_state_dict(optimizer_state_dict)
 
     criterion = nn.CrossEntropyLoss()
-    model, hist, optimizer_used = train_model(model, get_dataloaders(), criterion, optimizer, num_epochs=NUM_EPOCHS,
-                                              is_inception=is_inception())
-    return model, hist, optimizer_used
+
+    model, hist, state = train_model(model, get_dataloaders(), criterion, optimizer, num_epochs=NUM_EPOCHS,
+                                     is_inception=is_inception())
+    return model, hist, state
 
 
 def save_model(state, file_path):
-    # state = {
-    #     'epoch': epoch,
-    #     'state_dict': model.state_dict(),
-    #     'optimizer': optimizer.state_dict(),
-    #     ...
-    # }
     print('saving model to', file_path)
     torch.save(state, file_path)
 
 
-def get_model_architecture(name):
-    return initialize_model(name, False)
+def load_checkpoint(path):
+    pass
+
+
+def structure_checkpoints(global_path=DATA_PATH):
+    # Create directory structure for the finetuned models
+    # The sub folders are based on the datasets
+    main_folder = 'finetuned_models'
+    sub_folders = DATASET_OPTIONS
+    sub_sub_folders = CLASSIFIER_OPTIONS
+
+    main_folder_path = os.path.join(global_path, main_folder)
+    safe_mkdir(main_folder_path)
+
+    for sub_folder in sub_folders:
+        sub_folder_path = os.path.join(main_folder_path, sub_folder)
+        safe_mkdir(sub_folder_path)
+        for sub_sub_folder in sub_sub_folders:
+            sub_sub_folder_path = os.path.join(main_folder_path, sub_folder, sub_sub_folder)
+            safe_mkdir(sub_sub_folder_path)
+
+
+def safe_mkdir(path):
+    if not os.path.exists(path):
+        os.makedirs(path)
+    else:
+        print('cannot safely create', path)
+
+
+def get_model_architecture(name, _verbose=False):
+    return initialize_model(name, use_pretrained=False, _verbose=_verbose)
