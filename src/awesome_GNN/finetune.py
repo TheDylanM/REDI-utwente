@@ -13,6 +13,8 @@ CLASSIFIER_OPTIONS = ['resnet', 'alexnet', 'vgg', 'squeezenet', 'densenet', 'inc
 DATASET_OPTIONS = ['StanfordCars', 'FGVC-Aircraft']  # todo: add options
 
 DATA_PATH = '../../data'  # write to this variable when importing this module from different directory context than assumed here
+FINETUNED_MODELS_PATH = os.path.join(DATA_PATH,
+                                     'finetuned_models')  # Path to save the finedtuned models, relative to the global path
 DATASET = 'StanfordCars'  # write to this variable if you wish to use another dataset
 
 # hyperparams/parameters that need defining or tuning
@@ -107,12 +109,11 @@ def set_parameter_requires_grad(model, feature_extracting):
             param.requires_grad = False
 
 
-def initialize_model(use_pretrained=True):
+def initialize_model(model_name=CLASSIFIER_NAME, use_pretrained=True):
     num_classes = get_num_classes()
     feature_extract = FEATURE_EXTRACT
     # Initialize these variables which will be set in this if statement. Each of these
     #   variables is model specific.
-    model_name = CLASSIFIER_NAME
     model_ft = None
     input_size = 0
     if not model_name in CLASSIFIER_OPTIONS:
@@ -264,10 +265,10 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
 
     # load best model weights
     model.load_state_dict(best_model_wts)
-    return model, val_acc_history
+    return model, val_acc_history, optimizer
 
 
-def finetune_model(model):
+def finetune_model(model, optimizer_state_dict=None):
     # Gather the parameters to be optimized/updated in this run. If we are
     #  finetuning we will be updating all parameters. However, if we are
     #  doing feature extract method, we will only update the parameters
@@ -288,9 +289,29 @@ def finetune_model(model):
         for name, param in model.named_parameters():
             if param.requires_grad == True:
                 print("\t", name)
+
     # todo: choose a different optimizer?
     optimizer = optim.SGD(params_to_update, lr=LR, momentum=MOMENTUM)
+
+    if optimizer_state_dict is not None:
+        optimizer.load_state_dict(optimizer_state_dict)
+
     criterion = nn.CrossEntropyLoss()
-    model, hist = train_model(model, get_dataloaders(), criterion, optimizer, num_epochs=NUM_EPOCHS,
-                              is_inception=is_inception())
-    return model, hist
+    model, hist, optimizer_used = train_model(model, get_dataloaders(), criterion, optimizer, num_epochs=NUM_EPOCHS,
+                                              is_inception=is_inception())
+    return model, hist, optimizer_used
+
+
+def save_model(state, file_path):
+    # state = {
+    #     'epoch': epoch,
+    #     'state_dict': model.state_dict(),
+    #     'optimizer': optimizer.state_dict(),
+    #     ...
+    # }
+    print('saving model to', file_path)
+    torch.save(state, file_path)
+
+
+def get_model_architecture(name):
+    return initialize_model(name, False)
