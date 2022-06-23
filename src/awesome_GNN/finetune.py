@@ -8,6 +8,7 @@ import time
 import os
 import copy
 import tqdm
+import matplotlib.pyplot as plt
 
 CLASSIFIER_OPTIONS = ['resnet', 'alexnet', 'vgg', 'squeezenet', 'densenet', 'inception']
 DATASET_OPTIONS = ['StanfordCars', 'FGVC-Aircraft']  # todo: add options
@@ -188,11 +189,14 @@ def initialize_model(model_name=CLASSIFIER_NAME, use_pretrained=True, _verbose=T
     return model_ft
 
 
-def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_inception=False, is_retrain=None):
+def train_model(model, dataloaders, criterion, optimizer, checkpoint_save=0, num_epochs=25, is_inception=False,
+                is_retrain=None):
     # use is_retrain when loading from checkpoint, must be int of the last epoch
     since = time.time()
 
     val_acc_history = []
+    train_acc_history = []
+    train_loss_history = []
 
     best_model_wts = copy.deepcopy(model.state_dict())
     best_acc = 0.0
@@ -250,6 +254,9 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
             epoch_loss = running_loss / len(dataloaders[phase].dataset)
             epoch_acc = running_corrects.double() / len(dataloaders[phase].dataset)
 
+            train_acc_history.append(epoch_acc)
+            train_loss_history.append(epoch_loss)
+
             print('{} Loss: {:.4f} Acc: {:.4f}'.format(phase, epoch_loss, epoch_acc))
 
             # deep copy the model
@@ -258,6 +265,28 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
                 best_model_wts = copy.deepcopy(model.state_dict())
             if phase == 'val':
                 val_acc_history.append(epoch_acc)
+
+            # Create checkpoint
+            if epoch % checkpoint_save == 0 and checkpoint_save != 0 and epoch != 0:
+                e = epoch
+                if is_retrain:
+                    e = epoch + is_retrain
+
+                state = {
+                    'name': CLASSIFIER_NAME,
+                    'epochs': e,
+                    'model_state_dict': best_model_wts,
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'val_acc_history': val_acc_history,
+                    'train_acc_history': train_acc_history,
+                    'train_loss_history': train_loss_history
+                }
+
+                # save model
+                model_save_path = format_model_path(CLASSIFIER_NAME,
+                                                    DATASET,
+                                                    state['epochs'])
+                save_model(state, model_save_path)
 
         print()
 
@@ -270,7 +299,7 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
 
     e = num_epochs
     if is_retrain:
-        e = num_epochs+is_retrain
+        e = num_epochs + is_retrain
 
     # This state dict is used for the saving/loading models
     state = {
@@ -278,11 +307,14 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
         'epochs': e,
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
+        'val_acc_history': val_acc_history,
+        'train_acc_history': train_acc_history,
+        'train_loss_history': train_loss_history
     }
     return model, val_acc_history, state
 
 
-def finetune_model(model, optimizer_state_dict=None, _verbose=False, is_retrain=None):
+def finetune_model(model, checkpoint_save: int = 10, optimizer_state_dict=None, _verbose=False, is_retrain=None):
     # Gather the parameters to be optimized/updated in this run. If we are
     #  finetuning we will be updating all parameters. However, if we are
     #  doing feature extract method, we will only update the parameters
@@ -315,18 +347,37 @@ def finetune_model(model, optimizer_state_dict=None, _verbose=False, is_retrain=
 
     criterion = nn.CrossEntropyLoss()
 
-    model, hist, state = train_model(model, get_dataloaders(), criterion, optimizer, num_epochs=NUM_EPOCHS,
-                                     is_inception=is_inception(), is_retrain=is_retrain)
+    model, hist, state = train_model(model, get_dataloaders(),
+                                     criterion,
+                                     optimizer,
+                                     checkpoint_save=checkpoint_save,
+                                     num_epochs=NUM_EPOCHS,
+                                     is_inception=is_inception(),
+                                     is_retrain=is_retrain)
     return model, hist, state
 
 
 def save_model(state, file_path):
-    print('saving model to', file_path)
+    print('[CHECKPOINT]', file_path)
     torch.save(state, file_path)
 
 
 def load_checkpoint(path):
-    pass
+    return torch.load(path)
+
+
+def get_information_from_checkpoint(checkpoint, plot=False, figsize=(14, 6)):
+    # Checkpoint is the saved state of a model
+    train_acc_history = [t.item() for t in checkpoint['train_acc_history']]
+    train_loss_history = checkpoint['train_loss_history'] # The loss apparently is not a tensor
+    val_acc_history = [t.item() for t in checkpoint['val_acc_history']]
+
+    if plot:
+        fig, axes = plt.subplots(1, 3, figsize=figsize)
+        axes[0].plot(train_loss_history)
+        axes[1].plot(train_acc_history)
+        axes[2].plot(val_acc_history, color='orange')
+    return train_acc_history, train_loss_history, val_acc_history
 
 
 def structure_checkpoints(_verbose=False):
@@ -356,7 +407,7 @@ def safe_mkdir(path, _verbose=False):
 
 def format_model_path(name, dataset, epoch):
     path = os.path.join(FINETUNED_MODELS_PATH, dataset, name, '')
-    return path+str('{}_{}_E{}.pth'.format(name, dataset, epoch))
+    return path + str('{}_{}_E{}.pth'.format(name, dataset, epoch))
 
 
 def get_model_architecture(name, _verbose=False):
