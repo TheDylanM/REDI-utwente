@@ -314,7 +314,9 @@ def train_model(model, dataloaders, criterion, optimizer, checkpoint_save=0, num
     return model, val_acc_history, state
 
 
-def finetune_model(model, checkpoint_save: int = 10, optimizer_state_dict=None, _verbose=False, is_retrain=None):
+def finetune_model(model, optimizer_name='adam', checkpoint_save: int = 10, optimizer_state_dict=None, _verbose=False,
+                   is_retrain=None):
+    # Optimizer can be: [SGD, Adam]
     # Gather the parameters to be optimized/updated in this run. If we are
     #  finetuning we will be updating all parameters. However, if we are
     #  doing feature extract method, we will only update the parameters
@@ -339,8 +341,14 @@ def finetune_model(model, checkpoint_save: int = 10, optimizer_state_dict=None, 
                 if _verbose:
                     print("\t", name)
 
-    # todo: choose a different optimizer?
-    optimizer = optim.SGD(params_to_update, lr=LR, momentum=MOMENTUM)
+    if optimizer_name == 'adam':
+        alpha = 0.00005
+        beta_one = 0.9
+        beta_two = 0.999
+        epsilon = 0.0000007
+        optimizer = optim.Adam(params_to_update, lr=alpha, betas=(beta_one, beta_two), eps=epsilon)
+    else:  # Else just use SGD
+        optimizer = optim.SGD(params_to_update, lr=LR, momentum=MOMENTUM)
 
     if optimizer_state_dict is not None:
         optimizer.load_state_dict(optimizer_state_dict)
@@ -369,7 +377,7 @@ def load_checkpoint(path):
 def get_information_from_checkpoint(checkpoint, plot=False, figsize=(14, 6)):
     # Checkpoint is the saved state of a model
     train_acc_history = [t.item() for t in checkpoint['train_acc_history']]
-    train_loss_history = checkpoint['train_loss_history'] # The loss apparently is not a tensor
+    train_loss_history = checkpoint['train_loss_history']  # The loss apparently is not a tensor
     val_acc_history = [t.item() for t in checkpoint['val_acc_history']]
 
     if plot:
