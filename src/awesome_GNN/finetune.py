@@ -28,7 +28,10 @@ FEATURE_EXTRACT = True
 LR = 0.001
 MOMENTUM = 0.9
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
+ADAM_LR = 0.00005
+ADAM_BETA_ONE = 0.9
+ADAM_BETA_TWO = 0.999
+ADAM_EPSILON = 0.0000007
 
 def print_hypers():
     # print hyperparameters
@@ -342,11 +345,7 @@ def finetune_model(model, optimizer_name='adam', checkpoint_save: int = 10, opti
                     print("\t", name)
 
     if optimizer_name == 'adam':
-        alpha = 0.00005
-        beta_one = 0.9
-        beta_two = 0.999
-        epsilon = 0.0000007
-        optimizer = optim.Adam(params_to_update, lr=alpha, betas=(beta_one, beta_two), eps=epsilon)
+        optimizer = optim.Adam(params_to_update, lr=ADAM_LR, betas=(ADAM_BETA_ONE, ADAM_BETA_TWO), eps=ADAM_EPSILON)
     else:  # Else just use SGD
         optimizer = optim.SGD(params_to_update, lr=LR, momentum=MOMENTUM)
 
