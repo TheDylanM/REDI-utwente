@@ -269,7 +269,10 @@ def train_model(model,
                 labels = labels.to(device)
 
                 if phase == 'train' and occlusion is not None:
-                    inputs = apply_occlusion(inputs, model)
+                    # Apply occlusion to only half of the batches
+                    probability = 0.5
+                    if np.random.rand(1)[0] < probability:
+                        inputs = apply_occlusion(inputs, model)
 
 
                 # zero the parameter gradients
