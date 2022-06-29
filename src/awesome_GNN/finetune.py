@@ -37,7 +37,7 @@ ADAM_LR = 0.00005
 ADAM_BETA_ONE = 0.9
 ADAM_BETA_TWO = 0.999
 ADAM_EPSILON = 0.0000007
-
+OCCLUSION_THRESHOLD = 0.85
 
 def print_hypers():
     # print hyperparameters
@@ -207,7 +207,7 @@ def apply_occlusion(inputs, model):
 
     # You can also pass aug_smooth=True and eigen_smooth=True, to apply smoothing.
     grayscale_cam = cam(input_tensor=inputs)
-    t = 0.8
+    t = OCCLUSION_THRESHOLD
 
     for idx, cam in enumerate(grayscale_cam):
         mask = cam < t
@@ -270,8 +270,8 @@ def train_model(model,
 
                 if phase == 'train' and occlusion is not None:
                     # Apply occlusion to only half of the batches
-                    probability = 0.5
-                    if np.random.rand(1)[0] < probability:
+                    probability = 0.25
+                    if np.random.rand(1)[0] <= probability:
                         inputs = apply_occlusion(inputs, model)
 
 
