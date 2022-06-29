@@ -1,3 +1,4 @@
+import PIL.Image
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -197,18 +198,34 @@ def initialize_model(model_name=CLASSIFIER_NAME, use_pretrained=True, _verbose=T
     return model_ft
 
 
-def apply_occlusion(inputs, grayscale_cam):
-    grayscale_cam = grayscale_cam[0, :]
-    import torchvision.transforms as T
-    to_pil = T.ToPILImage()
+def apply_occlusion(inputs, model):
+    if CLASSIFIER_NAME == 'resnet':
+        target_layers = [model.layer4[-1]]
 
-    # image = transforms.ToPILImage()().convert('RGB')
-    img = to_pil((inputs[0]))
-    # print(img.show())
-    visualization = show_cam_on_image(np.asarray(img) / 255, grayscale_cam, use_rgb=True)
+    # TODO implement the GradCam thresholding here
+    cam = GradCAM(model=model, target_layers=target_layers, use_cuda=True)
 
-    from PIL import Image
-    Image.fromarray(visualization).show()
+    # You can also pass aug_smooth=True and eigen_smooth=True, to apply smoothing.
+    grayscale_cam = cam(input_tensor=inputs)
+    t = 0.8
+
+    for idx, cam in enumerate(grayscale_cam):
+        mask = cam < t
+        mask = torch.tensor(mask).to(device)
+
+        masked_img = inputs[idx]*mask
+        # import cv2
+        # import torchvision.transforms as T
+        # to_pil = T.ToPILImage()
+        # img = to_pil((masked_img))
+        # PIL.Image.fromarray(mask).show()
+        # result = cv2.bitwise_and(np.asarray(img), mask)
+
+        # PIL.Image.fromarray(result).show()
+        # print(img.show())
+        # print(inputs[0].cpu().detach().numpy())
+        # print(masked_img.cpu().detach().numpy())
+        inputs[idx] = masked_img
 
     return inputs
 
@@ -252,20 +269,7 @@ def train_model(model,
                 labels = labels.to(device)
 
                 if phase == 'train' and occlusion is not None:
-                    num_classes = get_num_classes()
-                    target_layers = [model.layer4[-1]]
-
-                    # TODO implement the GradCam thresholding here
-                    cam = GradCAM(model=model, target_layers=target_layers, use_cuda=True)
-                    targets = [ClassifierOutputTarget(30)]
-
-                    # You can also pass aug_smooth=True and eigen_smooth=True, to apply smoothing.
-                    grayscale_cam = cam(input_tensor=inputs)
-                    inputs = apply_occlusion(inputs, grayscale_cam)
-
-                    return
-
-
+                    inputs = apply_occlusion(inputs, model)
 
 
                 # zero the parameter gradients
