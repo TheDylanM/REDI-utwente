@@ -43,6 +43,8 @@ OCCLUSION_PROBABILITY = 0.25
 OCCLUSION_THRESHOLD = 0.85
 OCCLUSION_NAME = None  # name for the type of occlusion used. options are: '0', '1', 'GAUSSIAN',
 
+BASICALLY_INFINITY = 10000
+
 def print_hypers():
     # print hyperparameters
     print(
@@ -210,13 +212,13 @@ def get_target_layers(classifier):
 
 def threshold_mask(cams):
     mask = cams < OCCLUSION_THRESHOLD
-    return mask
+    return 1*mask[:, None, :, :]
 
 def softmax_mask(cams):
     # calculates softmax in 2D
     softmask = functional.softmax(cams, dim=-1) * functional.softmax(cams, dim=-2)
     # invert the softmax, such that it can be used as a multiplicative mask
-    return 1 - softmask
+    return 1*(1 - softmask)[:, None, :, :]
 
 
 def gaussian_smoothing(inputs):
@@ -256,7 +258,7 @@ def train_model(model,
                 criterion,
                 optimizer,
                 checkpoint_save=0,
-                num_epochs=25,
+                num_epochs=NUM_EPOCHS,
                 is_inception=False,
                 is_retrain=None):
     # use is_retrain when loading from checkpoint, must be int of the last epoch
@@ -268,7 +270,9 @@ def train_model(model,
 
     best_model_wts = copy.deepcopy(model.state_dict())
     best_acc = 0.0
-
+    best_epoch = -1
+    if num_epochs is None:
+        num_epochs = BASICALLY_INFINITY
     for epoch in range(num_epochs):
         # print('Epoch {}/{}'.format(epoch, num_epochs - 1))
         # print('-' * 10)
@@ -345,6 +349,7 @@ def train_model(model,
             # deep copy the model
             if phase == 'val' and epoch_acc > best_acc:
                 best_acc = epoch_acc
+                best_epoch = epoch
                 best_model_wts = copy.deepcopy(model.state_dict())
             if phase == 'val':
                 val_acc_history.append(epoch_acc)
@@ -352,28 +357,30 @@ def train_model(model,
             # Create checkpoint
             # check for modulo of epoch + 1, because epochs start at 0.
             # saving every 10th epoch means saving at epoch 9, not epoch 10.
-            if phase == 'val' and (epoch + 1) % checkpoint_save == 0 and checkpoint_save != 0:
-                e = epoch
-                if is_retrain:
-                    e = epoch + is_retrain
+                if (epoch + 1) % checkpoint_save == 0 and checkpoint_save != 0:
+                    e = epoch
+                    if is_retrain:
+                        e = epoch + is_retrain
 
-                state = {
-                    'name': CLASSIFIER_NAME,
-                    'epochs': e,
-                    'model_state_dict': best_model_wts,
-                    'optimizer_state_dict': optimizer.state_dict(),
-                    'occlusion': OCCLUSION_NAME,
-                    'val_acc_history': val_acc_history,
-                    'train_acc_history': train_acc_history,
-                    'train_loss_history': train_loss_history
-                }
+                    state = {
+                        'name': CLASSIFIER_NAME,
+                        'epochs': e,
+                        'model_state_dict': best_model_wts,
+                        'optimizer_state_dict': optimizer.state_dict(),
+                        'occlusion': OCCLUSION_NAME,
+                        'val_acc_history': val_acc_history,
+                        'train_acc_history': train_acc_history,
+                        'train_loss_history': train_loss_history
+                    }
 
-                # save model
-                safe_mkdir(os.path.join(FINETUNED_MODELS_PATH, DATASET, CLASSIFIER_NAME))
+                    # save model
+                    safe_mkdir(os.path.join(FINETUNED_MODELS_PATH, DATASET, CLASSIFIER_NAME))
 
-                save_model(state)
+                    save_model(state)
+        # early stopping
+        if num_epochs >= BASICALLY_INFINITY and epoch - best_epoch >= 30:
+            break
 
-        print()
 
     time_elapsed = time.time() - since
     print('Training complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
