@@ -1,4 +1,3 @@
-import PIL.Image
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -10,10 +9,6 @@ import os
 import copy
 import tqdm
 import matplotlib.pyplot as plt
-from pytorch_grad_cam import GradCAM, ScoreCAM, GradCAMPlusPlus, AblationCAM, XGradCAM, EigenCAM, FullGrad
-from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
-from pytorch_grad_cam.utils.image import show_cam_on_image
-
 
 CLASSIFIER_OPTIONS = ['resnet', 'alexnet', 'vgg', 'squeezenet', 'densenet', 'inception']
 DATASET_OPTIONS = ['StanfordCars', 'FGVC-Aircraft']  # todo: add options
@@ -33,11 +28,7 @@ FEATURE_EXTRACT = True
 LR = 0.001
 MOMENTUM = 0.9
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-ADAM_LR = 0.00005
-ADAM_BETA_ONE = 0.9
-ADAM_BETA_TWO = 0.999
-ADAM_EPSILON = 0.0000007
-OCCLUSION_THRESHOLD = 0.85
+
 
 def print_hypers():
     # print hyperparameters
@@ -72,7 +63,7 @@ def dataset_path():
 def get_num_classes():
     return {
         'StanfordCars': 196,
-        'FGVC-Aircraft': 100,
+        'FGVC-Aircraft': 30,
     }[DATASET]
 
 
@@ -198,46 +189,7 @@ def initialize_model(model_name=CLASSIFIER_NAME, use_pretrained=True, _verbose=T
     return model_ft
 
 
-def apply_occlusion(inputs, model):
-    if CLASSIFIER_NAME == 'resnet':
-        target_layers = [model.layer4[-1]]
-
-    # TODO implement the GradCam thresholding here
-    cam = GradCAM(model=model, target_layers=target_layers, use_cuda=True)
-
-    # You can also pass aug_smooth=True and eigen_smooth=True, to apply smoothing.
-    grayscale_cam = cam(input_tensor=inputs)
-    t = OCCLUSION_THRESHOLD
-
-    for idx, cam in enumerate(grayscale_cam):
-        mask = cam < t
-        mask = torch.tensor(mask).to(device)
-
-        masked_img = inputs[idx]*mask
-        # import cv2
-        # import torchvision.transforms as T
-        # to_pil = T.ToPILImage()
-        # img = to_pil((masked_img))
-        # PIL.Image.fromarray(mask).show()
-        # result = cv2.bitwise_and(np.asarray(img), mask)
-
-        # PIL.Image.fromarray(result).show()
-        # print(img.show())
-        # print(inputs[0].cpu().detach().numpy())
-        # print(masked_img.cpu().detach().numpy())
-        inputs[idx] = masked_img
-
-    return inputs
-
-
-def train_model(model,
-                dataloaders,
-                criterion,
-                optimizer,
-                checkpoint_save=0,
-                num_epochs=25,
-                is_inception=False,
-                occlusion: str = None,
+def train_model(model, dataloaders, criterion, optimizer, checkpoint_save=0, num_epochs=25, is_inception=False,
                 is_retrain=None):
     # use is_retrain when loading from checkpoint, must be int of the last epoch
     since = time.time()
@@ -267,13 +219,6 @@ def train_model(model,
             for inputs, labels in tqdm.tqdm(dataloaders[phase]):
                 inputs = inputs.to(device)
                 labels = labels.to(device)
-
-                if phase == 'train' and occlusion is not None:
-                    # Apply occlusion to only half of the batches
-                    probability = 0.25
-                    if np.random.rand(1)[0] <= probability:
-                        inputs = apply_occlusion(inputs, model)
-
 
                 # zero the parameter gradients
                 optimizer.zero_grad()
@@ -332,7 +277,6 @@ def train_model(model,
                     'epochs': e,
                     'model_state_dict': best_model_wts,
                     'optimizer_state_dict': optimizer.state_dict(),
-                    'occlusion': occlusion,
                     'val_acc_history': val_acc_history,
                     'train_acc_history': train_acc_history,
                     'train_loss_history': train_loss_history
@@ -341,10 +285,9 @@ def train_model(model,
                 # save model
                 model_save_path = format_model_path(CLASSIFIER_NAME,
                                                     DATASET,
-                                                    state['epochs'],
-                                                    occlusion=occlusion)
+                                                    state['epochs'])
+                
                 safe_mkdir(os.path.join(FINETUNED_MODELS_PATH, DATASET, CLASSIFIER_NAME))
-
                 save_model(state, model_save_path)
 
         print()
@@ -366,7 +309,6 @@ def train_model(model,
         'epochs': e,
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
-        'occlusion': occlusion,
         'val_acc_history': val_acc_history,
         'train_acc_history': train_acc_history,
         'train_loss_history': train_loss_history
@@ -374,13 +316,7 @@ def train_model(model,
     return model, val_acc_history, state
 
 
-def finetune_model(model, optimizer_name='adam',
-                   checkpoint_save: int = 10,
-                   optimizer_state_dict=None,
-                   _verbose=False,
-                   occlusion: str = None,
-                   is_retrain=None):
-    # Optimizer can be: [SGD, Adam]
+def finetune_model(model, checkpoint_save: int = 10, optimizer_state_dict=None, _verbose=False, is_retrain=None):
     # Gather the parameters to be optimized/updated in this run. If we are
     #  finetuning we will be updating all parameters. However, if we are
     #  doing feature extract method, we will only update the parameters
@@ -405,23 +341,20 @@ def finetune_model(model, optimizer_name='adam',
                 if _verbose:
                     print("\t", name)
 
-    if optimizer_name == 'adam':
-        optimizer = optim.Adam(params_to_update, lr=ADAM_LR, betas=(ADAM_BETA_ONE, ADAM_BETA_TWO), eps=ADAM_EPSILON)
-    else:  # Else just use SGD
-        optimizer = optim.SGD(params_to_update, lr=LR, momentum=MOMENTUM)
+    # todo: choose a different optimizer?
+    optimizer = optim.SGD(params_to_update, lr=LR, momentum=MOMENTUM)
 
     if optimizer_state_dict is not None:
         optimizer.load_state_dict(optimizer_state_dict)
 
     criterion = nn.CrossEntropyLoss()
-    model, hist, state = train_model(model,
-                                     get_dataloaders(),
+
+    model, hist, state = train_model(model, get_dataloaders(),
                                      criterion,
                                      optimizer,
                                      checkpoint_save=checkpoint_save,
                                      num_epochs=NUM_EPOCHS,
                                      is_inception=is_inception(),
-                                     occlusion=occlusion,
                                      is_retrain=is_retrain)
     return model, hist, state
 
@@ -438,7 +371,7 @@ def load_checkpoint(path):
 def get_information_from_checkpoint(checkpoint, plot=False, figsize=(14, 6)):
     # Checkpoint is the saved state of a model
     train_acc_history = [t.item() for t in checkpoint['train_acc_history']]
-    train_loss_history = checkpoint['train_loss_history']  # The loss apparently is not a tensor
+    train_loss_history = checkpoint['train_loss_history'] # The loss apparently is not a tensor
     val_acc_history = [t.item() for t in checkpoint['val_acc_history']]
 
     if plot:
@@ -475,12 +408,8 @@ def safe_mkdir(path, _verbose=False):
             print('cannot safely create', path)
 
 
-def format_model_path(name, dataset, epoch, occlusion=None):
-    path = os.path.join(FINETUNED_MODELS_PATH, dataset, name, '')
-    if occlusion is None:
-        return path + str('{}_{}_E{}.pth'.format(name, dataset, epoch))
-    else:
-        return path + str('{}_{}_E{}_occ{}.pth'.format(name, dataset, epoch, occlusion))
+def format_model_path(name, dataset, epoch):
+    return os.path.join(FINETUNED_MODELS_PATH, dataset, name, str('{}_{}_E{}.pth'.format(name, dataset, epoch)))
 
 
 def get_model_architecture(name, _verbose=False):
