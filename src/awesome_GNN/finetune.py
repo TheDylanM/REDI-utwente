@@ -72,7 +72,7 @@ def dataset_path():
 def get_num_classes():
     return {
         'StanfordCars': 196,
-        'FGVC-Aircraft': 30,
+        'FGVC-Aircraft': 100,
     }[DATASET]
 
 
