@@ -1,0 +1,7 @@
+jupyter
+matplotlib
+torch
+torchvision
+scipy
+tqdm
+grad-cam

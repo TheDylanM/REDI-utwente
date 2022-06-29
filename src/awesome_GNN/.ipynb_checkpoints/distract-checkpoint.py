@@ -25,9 +25,8 @@ CAM = None
 # grad cam reimplemented with torch tensors, instead of numpy ndarrays, to allow for backpropagation
 def scale_cam_image(cam: torch.Tensor, target_size=None) -> torch.Tensor:
     # this scaling is not really necessary for our purposes, since we don't need the CAM values to be between 0 and 1.
-    # cam = cam - torch.min(cam, 0).values  # todo: this may not be exactly optimal for backprop
-    # cam = cam / (1e-7 + torch.max(cam, 0).values)  # todo: this may not be exactly optimal for backprop
-    # cam = cam - cam.mean()  # centering values around zero
+    cam = cam - torch.min(cam, 0).values  # todo: this may not be exactly optimal for backprop
+    cam = cam / (1e-7 + torch.max(cam, 0).values)  # todo: this may not be exactly optimal for backprop
     if target_size is not None:
         cam = torchvision.transforms.functional.resize(cam, target_size)
     return cam
@@ -103,13 +102,13 @@ class DifferentiableGradCAM(GradCAM):
                       grads: torch.Tensor,
                       eigen_smooth: bool = False) -> torch.Tensor:
 
-        # weights = self.get_cam_weights(input_tensor,
-        #                                target_layer,
-        #                                targets,
-        #                                activations,
-        #                                grads)
-        # weighted_activations = weights[:, :, None, None] * activations-
-        weighted_activations = activations
+        weights = self.get_cam_weights(input_tensor,
+                                       target_layer,
+                                       targets,
+                                       activations,
+                                       grads)
+        weighted_activations = weights[:, :, None, None] * activations
+        # weighted_activations = activations
         if eigen_smooth:
             cam = get_2d_projection(weighted_activations)
         else:
@@ -185,6 +184,7 @@ class Distractor(torch.nn.Module):
     def forward(self, x):
         x = self.cnn(x)
         x = torch.multiply(functional.softmax(x, dim=-1), functional.softmax(x, dim=-2))
+        print(torch.sum(x))
         return 1 - x
 
 
