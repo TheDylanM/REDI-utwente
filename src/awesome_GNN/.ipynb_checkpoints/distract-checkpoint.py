@@ -25,8 +25,9 @@ CAM = None
 # grad cam reimplemented with torch tensors, instead of numpy ndarrays, to allow for backpropagation
 def scale_cam_image(cam: torch.Tensor, target_size=None) -> torch.Tensor:
     # this scaling is not really necessary for our purposes, since we don't need the CAM values to be between 0 and 1.
-    cam = cam - torch.min(cam, 0).values  # todo: this may not be exactly optimal for backprop
-    cam = cam / (1e-7 + torch.max(cam, 0).values)  # todo: this may not be exactly optimal for backprop
+    # cam = cam - torch.min(cam, 0).values  # todo: this may not be exactly optimal for backprop
+    # cam = cam / (1e-7 + torch.max(cam, 0).values)  # todo: this may not be exactly optimal for backprop
+    # cam = cam - cam.mean()  # centering values around zero
     if target_size is not None:
         cam = torchvision.transforms.functional.resize(cam, target_size)
     return cam
@@ -102,13 +103,13 @@ class DifferentiableGradCAM(GradCAM):
                       grads: torch.Tensor,
                       eigen_smooth: bool = False) -> torch.Tensor:
 
-        weights = self.get_cam_weights(input_tensor,
-                                       target_layer,
-                                       targets,
-                                       activations,
-                                       grads)
-        weighted_activations = weights[:, :, None, None] * activations
-        # weighted_activations = activations
+        # weights = self.get_cam_weights(input_tensor,
+        #                                target_layer,
+        #                                targets,
+        #                                activations,
+        #                                grads)
+        # weighted_activations = weights[:, :, None, None] * activations-
+        weighted_activations = activations
         if eigen_smooth:
             cam = get_2d_projection(weighted_activations)
         else:
@@ -184,7 +185,6 @@ class Distractor(torch.nn.Module):
     def forward(self, x):
         x = self.cnn(x)
         x = torch.multiply(functional.softmax(x, dim=-1), functional.softmax(x, dim=-2))
-        print(torch.sum(x))
         return 1 - x
 
 
@@ -226,7 +226,7 @@ def grad_cam_from_batch(classifier, batch):
 
 
 def initialize_distractor(classifier):
-    distractor = GumbelDistractor(n_layers=1)
+    distractor = GumbelDistractor(n_layers=4)
     # distractor = Distractor()
     distractor.to(finetune.device)
     return distractor
@@ -240,6 +240,9 @@ def cam_avg_std(cam_batch):
     # calculates the average standard deviation of a batch of class activation mappings
     stds = torch.std(cam_batch, tuple(range(1, len(cam_batch.shape))))
     return torch.mean(stds)
+
+def cam_relative_increase(old_cam, new_cam):
+    return torch.mean(torch.divide(new_cam, old_cam))
 
 
 def plot_loss_history(history):
@@ -267,7 +270,8 @@ def train_distractor(distractor, classifier):
 
     # optimizer = optim.SGD(params_to_update, lr=DISTRACTOR_LR, momentum=DISTRACTOR_MOMENTUM)
     optimizer = optim.Adam(params_to_update, lr=DISTRACTOR_LR)
-    criterion = cam_avg_std
+    # criterion = cam_avg_std
+    criterion = lambda *args: -cam_relative_increase(*args)
     history = []
     baseline = 'baseline'
     distracted = 'distracted'
@@ -311,11 +315,11 @@ def train_distractor(distractor, classifier):
                     ## distracted_predictions = classifier(distracting_inputs)
                     distracted_cams = grad_cam_from_batch(classifier, (distracting_inputs, labels))
                     # print(torch.all(cams == distracted_cams))
+                    # baseline_loss = criterion(cams)
+                    # distracted_loss = criterion(distracted_cams)
+                    distracted_loss = criterion(cams, distracted_cams)
 
-                    baseline_loss = criterion(cams)
-                    distracted_loss = criterion(distracted_cams)
-
-                    history[epoch][phase][baseline].append(baseline_loss.cpu().item())
+                    # history[epoch][phase][baseline].append(baseline_loss.cpu().item())
                     history[epoch][phase][distracted].append(distracted_loss.cpu().item())
                     if training:
                         optimizer.zero_grad()
@@ -329,7 +333,7 @@ def train_distractor(distractor, classifier):
                         history[epoch][phase]['avg_parameter_grad'].append(parameter_avg_grad.cpu().item())
 
                     tqdm_obj.set_postfix({
-                        'avg_baseline_loss': f'{avg(history[epoch][phase][baseline]):.5g}',
+                        # 'avg_baseline_loss': f'{avg(history[epoch][phase][baseline]):.5g}',
                         'avg_distractor_loss': f'{avg(history[epoch][phase][distracted]):.5g}',
                         **({
                                'avg_parameter_grad': f'{avg(history[epoch][phase][avg_parameter_grad]):+.5g}',

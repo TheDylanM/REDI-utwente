@@ -226,7 +226,7 @@ def grad_cam_from_batch(classifier, batch):
 
 
 def initialize_distractor(classifier):
-    distractor = GumbelDistractor(n_layers=1)
+    distractor = GumbelDistractor(n_layers=4)
     # distractor = Distractor()
     distractor.to(finetune.device)
     return distractor
@@ -240,6 +240,9 @@ def cam_avg_std(cam_batch):
     # calculates the average standard deviation of a batch of class activation mappings
     stds = torch.std(cam_batch, tuple(range(1, len(cam_batch.shape))))
     return torch.mean(stds)
+
+def cam_relative_increase(old_cam, new_cam):
+    return torch.mean(torch.divide(new_cam, old_cam))
 
 
 def plot_loss_history(history):
@@ -267,7 +270,8 @@ def train_distractor(distractor, classifier):
 
     # optimizer = optim.SGD(params_to_update, lr=DISTRACTOR_LR, momentum=DISTRACTOR_MOMENTUM)
     optimizer = optim.Adam(params_to_update, lr=DISTRACTOR_LR)
-    criterion = cam_avg_std
+    # criterion = cam_avg_std
+    criterion = lambda *args: -cam_relative_increase(*args)
     history = []
     baseline = 'baseline'
     distracted = 'distracted'
@@ -311,11 +315,11 @@ def train_distractor(distractor, classifier):
                     ## distracted_predictions = classifier(distracting_inputs)
                     distracted_cams = grad_cam_from_batch(classifier, (distracting_inputs, labels))
                     # print(torch.all(cams == distracted_cams))
+                    # baseline_loss = criterion(cams)
+                    # distracted_loss = criterion(distracted_cams)
+                    distracted_loss = criterion(cams, distracted_cams)
 
-                    baseline_loss = criterion(cams)
-                    distracted_loss = criterion(distracted_cams)
-
-                    history[epoch][phase][baseline].append(baseline_loss.cpu().item())
+                    # history[epoch][phase][baseline].append(baseline_loss.cpu().item())
                     history[epoch][phase][distracted].append(distracted_loss.cpu().item())
                     if training:
                         optimizer.zero_grad()
@@ -329,7 +333,7 @@ def train_distractor(distractor, classifier):
                         history[epoch][phase]['avg_parameter_grad'].append(parameter_avg_grad.cpu().item())
 
                     tqdm_obj.set_postfix({
-                        'avg_baseline_loss': f'{avg(history[epoch][phase][baseline]):.5g}',
+                        # 'avg_baseline_loss': f'{avg(history[epoch][phase][baseline]):.5g}',
                         'avg_distractor_loss': f'{avg(history[epoch][phase][distracted]):.5g}',
                         **({
                                'avg_parameter_grad': f'{avg(history[epoch][phase][avg_parameter_grad]):+.5g}',
