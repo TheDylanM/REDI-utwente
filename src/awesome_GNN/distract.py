@@ -208,11 +208,6 @@ class GumbelDistractor(torch.nn.Module):
         return 1 - x_gumbel
 
 
-def get_target_layers(classifier):
-    target_layers = []
-    if type(classifier) == models.ResNet:  # todo: more models
-        target_layers = [classifier.layer4[-1]]
-    return target_layers
 
 
 def grad_cam_from_batch(classifier, batch):
@@ -288,7 +283,7 @@ def train_distractor(distractor, classifier):
     distracted = 'distracted'
     avg_parameter_grad = 'avg_parameter_grad'
 
-    target_layers = get_target_layers(classifier)
+    target_layers = finetune.get_target_layers(classifier)
     with DifferentiableGradCAM(model=classifier, target_layers=target_layers, use_cuda=torch.cuda.is_available()) as cam:
         global CAM
         CAM = cam
