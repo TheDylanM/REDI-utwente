@@ -358,9 +358,9 @@ def train_model(model,
             # check for modulo of epoch + 1, because epochs start at 0.
             # saving every 10th epoch means saving at epoch 9, not epoch 10.
                 if (epoch + 1) % checkpoint_save == 0 and checkpoint_save != 0:
-                    e = epoch
+                    e = epoch + 1
                     if is_retrain:
-                        e = epoch + is_retrain
+                        e = epoch + 1 + is_retrain
 
                     state = {
                         'name': CLASSIFIER_NAME,
