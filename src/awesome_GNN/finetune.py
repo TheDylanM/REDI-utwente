@@ -471,7 +471,6 @@ def test_model(path, save_path, _verbose=False):
     # print(f'Testing model located {path}')
 
     state = load_checkpoint(path)
-    print(state.keys())
     # Read properties from the loaded checkpoint state
     model_name = state['name']
     epochs = state['epochs']
@@ -479,7 +478,8 @@ def test_model(path, save_path, _verbose=False):
 
     print(f'name:      {model_name} \n'
           f'epochs:    {epochs} \n'
-          f'occlusion: {occlusion}')
+          f'occlusion: {occlusion}\n'
+          f'--------------------------')
 
     # Load model
     model = get_model_architecture(model_name)
@@ -491,29 +491,32 @@ def test_model(path, save_path, _verbose=False):
     total_predictions = []
     total_labels = []
 
-
     start_time = time.time()
 
     # Iterate over data.
     # tqdm_obj = tqdm.tqdm(test_dataloader)
-
     # tqdm_obj.set_description(desc=f'Epoch {epoch}/{num_epochs - 1} {phase}')
-    for i, (inputs, labels) in enumerate(test_dataloader):
-        print(i)
 
+    # Testing loop
+    for (inputs, labels) in tqdm.tqdm(test_dataloader):
         inputs = inputs.to(device)
         labels = labels.to(device)
         outputs = model(inputs)
 
-        _, preds = torch.max(outputs)
+        preds = torch.argmax(outputs, dim=1)
 
-        np.append(total_predictions, preds.numpy())
-        break
-    # Testing loop
+        total_predictions = np.append(total_predictions, preds.cpu().numpy())
+        total_labels = np.append(total_labels, labels.cpu().numpy())
+
+    # Save these metrics, including the predicted and labels with it
+    metrics = calculate_metrics(total_predictions, total_labels)
+    metrics['total_predicted'] = total_predictions
+    metrics['total_labels'] = total_labels
 
     time_elapsed = time.time() - start_time
     print('total preds', total_predictions)
-    return total_predictions, total_labels
+    return metrics
+
 
 def save_model(state):
     # this does assume that the global variables have the appropriate values. So save your model before
@@ -589,22 +592,26 @@ def read_file(path):
     return open(path, 'r').read()
 
 
-def precision(outputs, labels):
-    op = outputs
-    la = labels
-    _, preds = torch.max(op, dim=1)
-    return torch.tensor(precision_score(la, preds, average='weighted', zero_division=0)).item()
+def calculate_metrics(preds, labels):
+    return {
+        'accuracy': accuracy(preds, labels),
+        'precision': precision(preds, labels),
+        'recall': recall(preds, labels),
+        'f1': f1(preds, labels)
+    }
 
 
-def recall(outputs, labels):
-    op = outputs
-    la = labels
-    _, preds = torch.max(op, dim=1)
-    return torch.tensor(recall_score(la, preds, average='weighted', zero_division=0)).item()
+def accuracy(preds, labels):
+    return (preds == labels).sum() / len(preds)
 
 
-def f1(outputs, labels):
-    op = outputs
-    la = labels
-    _, preds = torch.max(op, dim=1)
-    return torch.tensor(f1_score(la, preds, average='weighted', zero_division=0)).item()
+def precision(preds, labels):
+    return precision_score(labels, preds, average='weighted', zero_division=0)
+
+
+def recall(preds, labels):
+    return recall_score(labels, preds, average='weighted', zero_division=0)
+
+
+def f1(preds, labels):
+    return f1_score(labels, preds, average='weighted', zero_division=0)
