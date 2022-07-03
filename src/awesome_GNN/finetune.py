@@ -11,13 +11,14 @@ import os
 import copy
 import tqdm
 import matplotlib.pyplot as plt
+from sklearn.metrics import precision_score, recall_score, f1_score
 from pytorch_grad_cam import GradCAM, ScoreCAM, GradCAMPlusPlus, AblationCAM, XGradCAM, EigenCAM, FullGrad
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 from pytorch_grad_cam.utils.image import show_cam_on_image
 
-
 CLASSIFIER_OPTIONS = ['resnet', 'alexnet', 'vgg', 'squeezenet', 'densenet', 'inception']
 DATASET_OPTIONS = ['StanfordCars', 'FGVC-Aircraft']  # todo: add options
+OCCLUSION_OPTIONS = [None, '0', '1', 'SOFTMAX', 'GAUSSIAN']
 
 DATA_PATH = '../../data'  # write to this variable when importing this module from different directory context than assumed here
 FINETUNED_MODELS_PATH = os.path.join(DATA_PATH,
@@ -41,9 +42,10 @@ ADAM_BETA_TWO = 0.999
 ADAM_EPSILON = 0.0000007
 OCCLUSION_PROBABILITY = 0.25
 OCCLUSION_THRESHOLD = 0.85
-OCCLUSION_NAME = None  # name for the type of occlusion used. options are: '0', '1', 'GAUSSIAN',
+OCCLUSION_NAME = None  # name for the type of occlusion used. options are: '0', '1', 'GAUSSIAN', 'SOFTMAX'
 
 BASICALLY_INFINITY = 10000
+
 
 def print_hypers():
     # print hyperparameters
@@ -97,23 +99,29 @@ def get_data_transforms():
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ]),
+        'test': transforms.Compose([
+            transforms.RandomResizedCrop(CLASSIFIER_INPUT_SIZE),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ])
     }
 
 
-def get_dataset():
+def get_dataset(subsets):
     # assumes a path pointing to a set of folders representing classes, and the samples within those
     # classes to be in their respective folders
     tforms = get_data_transforms()
     dataset = {}
-    for x in ['train', 'val']:
+    for x in subsets:
         dataset[x] = datasets.ImageFolder(os.path.join(dataset_path(), x), tforms[x])
     return dataset
 
 
-def get_dataloaders():
-    ds = get_dataset()
+def get_dataloaders(subsets=['train', 'val']):
+    ds = get_dataset(subsets)
     dataloaders = {}
-    for x in ['train', 'val']:
+    for x in subsets:
         dataloaders[x] = torch.utils.data.DataLoader(ds[x], batch_size=BATCH_SIZE, shuffle=True, num_workers=4)
     return dataloaders
 
@@ -210,15 +218,17 @@ def get_target_layers(classifier):
         target_layers = [classifier.layer4[-1]]
     return target_layers
 
+
 def threshold_mask(cams):
     mask = cams < OCCLUSION_THRESHOLD
-    return 1*mask[:, None, :, :]
+    return 1 * mask[:, None, :, :]
+
 
 def softmax_mask(cams):
     # calculates softmax in 2D
     softmask = functional.softmax(cams, dim=-1) * functional.softmax(cams, dim=-2)
     # invert the softmax, such that it can be used as a multiplicative mask
-    return 1*(1 - softmask)[:, None, :, :]
+    return 1 * (1 - softmask)[:, None, :, :]
 
 
 def gaussian_smoothing(inputs):
@@ -290,7 +300,7 @@ def train_model(model,
 
             # Iterate over data.
             tqdm_obj = tqdm.tqdm(dataloaders[phase])
-            tqdm_obj.set_description(desc=f'Epoch {epoch}/{num_epochs-1} {phase}')
+            tqdm_obj.set_description(desc=f'Epoch {epoch}/{num_epochs - 1} {phase}')
             for i, (inputs, labels) in enumerate(tqdm_obj):
                 running_sample_count += len(inputs)
                 inputs = inputs.to(device)
@@ -300,7 +310,6 @@ def train_model(model,
                     # Apply occlusion to only half of the batches
                     if np.random.rand(1)[0] <= OCCLUSION_PROBABILITY:
                         inputs = apply_occlusion(inputs, model)
-
 
                 # zero the parameter gradients
                 optimizer.zero_grad()
@@ -334,8 +343,8 @@ def train_model(model,
                 running_corrects += torch.sum(preds == labels.data)
                 tqdm_obj.set_postfix({
                     # f'phase': phase,
-                    'loss': f'{running_loss/running_sample_count:.5g}',
-                    'accuracy': f'{running_corrects.double()/running_sample_count:.5g}',
+                    'loss': f'{running_loss / running_sample_count:.5g}',
+                    'accuracy': f'{running_corrects.double() / running_sample_count:.5g}',
                 })
 
             epoch_loss = running_loss / len(dataloaders[phase].dataset)
@@ -354,9 +363,9 @@ def train_model(model,
             if phase == 'val':
                 val_acc_history.append(epoch_acc)
 
-            # Create checkpoint
-            # check for modulo of epoch + 1, because epochs start at 0.
-            # saving every 10th epoch means saving at epoch 9, not epoch 10.
+                # Create checkpoint
+                # check for modulo of epoch + 1, because epochs start at 0.
+                # saving every 10th epoch means saving at epoch 9, not epoch 10.
                 if (epoch + 1) % checkpoint_save == 0 and checkpoint_save != 0:
                     e = epoch + 1
                     if is_retrain:
@@ -380,7 +389,6 @@ def train_model(model,
         # early stopping
         if num_epochs >= BASICALLY_INFINITY and epoch - best_epoch >= 30:
             break
-
 
     time_elapsed = time.time() - since
     print('Training complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
@@ -459,6 +467,54 @@ def finetune_model(model,
     return model, hist, state
 
 
+def test_model(path, save_path, _verbose=False):
+    # print(f'Testing model located {path}')
+
+    state = load_checkpoint(path)
+    print(state.keys())
+    # Read properties from the loaded checkpoint state
+    model_name = state['name']
+    epochs = state['epochs']
+    occlusion = state['occlusion']
+
+    print(f'name:      {model_name} \n'
+          f'epochs:    {epochs} \n'
+          f'occlusion: {occlusion}')
+
+    # Load model
+    model = get_model_architecture(model_name)
+    model.load_state_dict(state['model_state_dict'])
+    model.eval()
+
+    test_dataloader = get_dataloaders(['test'])['test']
+
+    total_predictions = []
+    total_labels = []
+
+
+    start_time = time.time()
+
+    # Iterate over data.
+    # tqdm_obj = tqdm.tqdm(test_dataloader)
+
+    # tqdm_obj.set_description(desc=f'Epoch {epoch}/{num_epochs - 1} {phase}')
+    for i, (inputs, labels) in enumerate(test_dataloader):
+        print(i)
+
+        inputs = inputs.to(device)
+        labels = labels.to(device)
+        outputs = model(inputs)
+
+        _, preds = torch.max(outputs)
+
+        np.append(total_predictions, preds.numpy())
+        break
+    # Testing loop
+
+    time_elapsed = time.time() - start_time
+    print('total preds', total_predictions)
+    return total_predictions, total_labels
+
 def save_model(state):
     # this does assume that the global variables have the appropriate values. So save your model before
     # setting up global variables for a different run of finetuning!
@@ -468,7 +524,7 @@ def save_model(state):
 
 
 def load_checkpoint(path):
-    return torch.load(path)
+    return torch.load(path, map_location=torch.device('cpu'))
 
 
 def get_information_from_checkpoint(checkpoint, plot=False, figsize=(14, 6)):
@@ -521,3 +577,34 @@ def format_model_path(name, dataset, epoch):
 
 def get_model_architecture(name, _verbose=False):
     return initialize_model(name, use_pretrained=False, _verbose=_verbose)
+
+
+def write_to_file(path, content):
+    f = open(path, "w")
+    f.write(content)
+    f.close()
+
+
+def read_file(path):
+    return open(path, 'r').read()
+
+
+def precision(outputs, labels):
+    op = outputs
+    la = labels
+    _, preds = torch.max(op, dim=1)
+    return torch.tensor(precision_score(la, preds, average='weighted', zero_division=0)).item()
+
+
+def recall(outputs, labels):
+    op = outputs
+    la = labels
+    _, preds = torch.max(op, dim=1)
+    return torch.tensor(recall_score(la, preds, average='weighted', zero_division=0)).item()
+
+
+def f1(outputs, labels):
+    op = outputs
+    la = labels
+    _, preds = torch.max(op, dim=1)
+    return torch.tensor(f1_score(la, preds, average='weighted', zero_division=0)).item()
