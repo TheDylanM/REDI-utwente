@@ -11,6 +11,7 @@ import os
 import copy
 import tqdm
 import matplotlib.pyplot as plt
+from sklearn.metrics import precision_score, recall_score, f1_score
 from pytorch_grad_cam import GradCAM, ScoreCAM, GradCAMPlusPlus, AblationCAM, XGradCAM, EigenCAM, FullGrad
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 from pytorch_grad_cam.utils.image import show_cam_on_image
@@ -24,7 +25,7 @@ OCCLUSION_OPTIONS = [None, '0', '1', 'GAUSSIAN', 'SOFTMAX']
 DATA_PATH = '../../data'  # write to this variable when importing this module from different directory context than assumed here
 FINETUNED_MODELS_PATH = os.path.join(DATA_PATH,
                                      'finetuned_models')  # Path to save the finedtuned models, relative to the global path
-DATASET = 'StanfordCars'  # write to this variable if you wish to use another dataset
+DATASET = 'FGVC-Aircraft'  # write to this variable if you wish to use another dataset
 
 # hyperparams/parameters that need defining or tuning
 CLASSIFIER_NAME = 'resnet'
@@ -32,7 +33,7 @@ CLASSIFIER_INPUT_SIZE = None
 BATCH_SIZE = 8
 NUM_EPOCHS = 15
 # NUM_CLASSES = 0
-FEATURE_EXTRACT = True
+FEATURE_EXTRACT = False
 OPTIMIZER_NAME = 'adam'
 LR = 0.001
 MOMENTUM = 0.9
@@ -45,6 +46,7 @@ OCCLUSION_THRESHOLD = 0.85
 OCCLUSION_NAME = None  # name for the type of occlusion used. options are listed above
 
 BASICALLY_INFINITY = 10000
+
 
 def print_hypers():
     # print hyperparameters
@@ -98,23 +100,29 @@ def get_data_transforms():
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ]),
+        'test': transforms.Compose([
+            transforms.RandomResizedCrop(CLASSIFIER_INPUT_SIZE),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ])
     }
 
 
-def get_dataset():
+def get_dataset(subsets):
     # assumes a path pointing to a set of folders representing classes, and the samples within those
     # classes to be in their respective folders
     tforms = get_data_transforms()
     dataset = {}
-    for x in ['train', 'val']:
+    for x in subsets:
         dataset[x] = datasets.ImageFolder(os.path.join(dataset_path(), x), tforms[x])
     return dataset
 
 
-def get_dataloaders():
-    ds = get_dataset()
+def get_dataloaders(subsets=['train', 'val']):
+    ds = get_dataset(subsets)
     dataloaders = {}
-    for x in ['train', 'val']:
+    for x in subsets:
         dataloaders[x] = torch.utils.data.DataLoader(ds[x], batch_size=BATCH_SIZE, shuffle=True, num_workers=4)
     return dataloaders
 
@@ -126,13 +134,18 @@ def set_parameter_requires_grad(model, feature_extracting):
             param.requires_grad = False
 
 
-def initialize_model(model_name=CLASSIFIER_NAME, use_pretrained=True, _verbose=True):
+def initialize_model(use_pretrained=True, _verbose=True):
+    model_name = CLASSIFIER_NAME
     num_classes = get_num_classes()
     feature_extract = FEATURE_EXTRACT
     # Initialize these variables which will be set in this if statement. Each of these
     #   variables is model specific.
     model_ft = None
     input_size = 0
+
+    if _verbose:
+        print(f'initializing model: {model_name}')
+
     if not model_name in CLASSIFIER_OPTIONS:
         raise Exception(
             f'Invalid classifier name "{model_name}".\nPlease use one of the following: {CLASSIFIER_OPTIONS}')
@@ -211,15 +224,17 @@ def get_target_layers(classifier):
         target_layers = [classifier.layer4[-1]]
     return target_layers
 
+
 def threshold_mask(cams):
     mask = cams < OCCLUSION_THRESHOLD
-    return 1*mask[:, None, :, :]
+    return 1 * mask[:, None, :, :]
+
 
 def softmax_mask(cams):
     # calculates softmax in 2D
     softmask = functional.softmax(cams, dim=-1) * functional.softmax(cams, dim=-2)
     # invert the softmax, such that it can be used as a multiplicative mask
-    return 1*(1 - softmask)[:, None, :, :]
+    return 1 * (1 - softmask)[:, None, :, :]
 
 
 def gaussian_smoothing(inputs):
@@ -291,7 +306,7 @@ def train_model(model,
 
             # Iterate over data.
             tqdm_obj = tqdm.tqdm(dataloaders[phase])
-            tqdm_obj.set_description(desc=f'Epoch {epoch}/{num_epochs-1} {phase}')
+            tqdm_obj.set_description(desc=f'Epoch {epoch}/{num_epochs - 1} {phase}')
             for i, (inputs, labels) in enumerate(tqdm_obj):
                 running_sample_count += len(inputs)
                 inputs = inputs.to(device)
@@ -301,7 +316,6 @@ def train_model(model,
                     # Apply occlusion to only half of the batches
                     if np.random.rand(1)[0] <= OCCLUSION_PROBABILITY:
                         inputs = apply_occlusion(inputs, model)
-
 
                 # zero the parameter gradients
                 optimizer.zero_grad()
@@ -335,8 +349,8 @@ def train_model(model,
                 running_corrects += torch.sum(preds == labels.data)
                 tqdm_obj.set_postfix({
                     # f'phase': phase,
-                    'loss': f'{running_loss/running_sample_count:.5g}',
-                    'accuracy': f'{running_corrects.double()/running_sample_count:.5g}',
+                    'loss': f'{running_loss / running_sample_count:.5g}',
+                    'accuracy': f'{running_corrects.double() / running_sample_count:.5g}',
                 })
 
             epoch_loss = running_loss / len(dataloaders[phase].dataset)
@@ -355,13 +369,13 @@ def train_model(model,
             if phase == 'val':
                 val_acc_history.append(epoch_acc)
 
-            # Create checkpoint
-            # check for modulo of epoch + 1, because epochs start at 0.
-            # saving every 10th epoch means saving at epoch 9, not epoch 10.
+                # Create checkpoint
+                # check for modulo of epoch + 1, because epochs start at 0.
+                # saving every 10th epoch means saving at epoch 9, not epoch 10.
                 if (epoch + 1) % checkpoint_save == 0 and checkpoint_save != 0:
-                    e = epoch
+                    e = epoch + 1
                     if is_retrain:
-                        e = epoch + is_retrain
+                        e = epoch + 1 + is_retrain
 
                     state = {
                         'name': CLASSIFIER_NAME,
@@ -381,7 +395,6 @@ def train_model(model,
         # early stopping
         if num_epochs >= BASICALLY_INFINITY and epoch - best_epoch >= 30:
             break
-
 
     time_elapsed = time.time() - since
     print('Training complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
@@ -460,6 +473,58 @@ def finetune_model(model,
     return model, hist, state
 
 
+def test_model(path, _verbose=False):
+    state = load_checkpoint(path)
+
+    # Read properties from the loaded checkpoint state
+    model_name = state['name']
+    epochs = state['epochs']
+    occlusion = state['occlusion']
+
+    if _verbose:
+        print(f'name:      {model_name} \n'
+              f'epochs:    {epochs} \n'
+              f'occlusion: {occlusion}\n'
+              f'--------------------------')
+
+    # Load model
+    model = get_model_architecture(model_name)
+    model.load_state_dict(state['model_state_dict'])
+    model.eval()
+
+    test_dataloader = get_dataloaders(['test'])['test']
+
+    total_predictions = []
+    total_labels = []
+    start_time = time.time()
+
+    # Iterate over data.
+    # tqdm_obj = tqdm.tqdm(test_dataloader)
+    # tqdm_obj.set_description(desc=f'Epoch {epoch}/{num_epochs - 1} {phase}')
+
+    # Testing loop
+    for (inputs, labels) in tqdm.tqdm(test_dataloader):
+        inputs = inputs.to(device)
+        labels = labels.to(device)
+        outputs = model(inputs)
+        preds = torch.argmax(outputs, dim=1)
+
+        total_predictions = np.append(total_predictions, preds.cpu().numpy())
+        total_labels = np.append(total_labels, labels.cpu().numpy())
+
+    # Save these metrics, including the predicted and labels with it
+    metrics = calculate_metrics(total_predictions, total_labels)
+    metrics['total_predicted'] = total_predictions
+    metrics['total_labels'] = total_labels
+
+    time_elapsed = time.time() - start_time
+
+    if _verbose:
+        print('Elapsed time:', time_elapsed)
+
+    return metrics
+
+
 def save_model(state):
     # this does assume that the global variables have the appropriate values. So save your model before
     # setting up global variables for a different run of finetuning!
@@ -469,7 +534,7 @@ def save_model(state):
 
 
 def load_checkpoint(path):
-    return torch.load(path)
+    return torch.load(path, map_location='cpu')
 
 
 def get_information_from_checkpoint(checkpoint, plot=False, figsize=(14, 6)):
@@ -523,4 +588,39 @@ def format_model_path(name, dataset, epoch, occlusion_name=None):
 
 
 def get_model_architecture(name, _verbose=False):
-    return initialize_model(name, use_pretrained=False, _verbose=_verbose)
+    return initialize_model(name, use_pretrained=True, _verbose=_verbose)
+
+
+def write_to_file(path, content):
+    f = open(path, "w")
+    f.write(content)
+    f.close()
+
+
+def read_file(path):
+    return open(path, 'r').read()
+
+
+def calculate_metrics(preds, labels):
+    return {
+        'accuracy': accuracy(preds, labels),
+        'precision': precision(preds, labels),
+        'recall': recall(preds, labels),
+        'f1': f1(preds, labels)
+    }
+
+
+def accuracy(preds, labels):
+    return (preds == labels).sum() / len(preds)
+
+
+def precision(preds, labels):
+    return precision_score(labels, preds, average='weighted', zero_division=0)
+
+
+def recall(preds, labels):
+    return recall_score(labels, preds, average='weighted', zero_division=0)
+
+
+def f1(preds, labels):
+    return f1_score(labels, preds, average='weighted', zero_division=0)
