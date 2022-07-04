@@ -467,19 +467,19 @@ def finetune_model(model,
     return model, hist, state
 
 
-def test_model(path, save_path, _verbose=False):
-    # print(f'Testing model located {path}')
-
+def test_model(path, _verbose=False):
     state = load_checkpoint(path)
+
     # Read properties from the loaded checkpoint state
     model_name = state['name']
     epochs = state['epochs']
     occlusion = state['occlusion']
 
-    print(f'name:      {model_name} \n'
-          f'epochs:    {epochs} \n'
-          f'occlusion: {occlusion}\n'
-          f'--------------------------')
+    if _verbose:
+        print(f'name:      {model_name} \n'
+              f'epochs:    {epochs} \n'
+              f'occlusion: {occlusion}\n'
+              f'--------------------------')
 
     # Load model
     model = get_model_architecture(model_name)
@@ -490,7 +490,6 @@ def test_model(path, save_path, _verbose=False):
 
     total_predictions = []
     total_labels = []
-
     start_time = time.time()
 
     # Iterate over data.
@@ -502,7 +501,6 @@ def test_model(path, save_path, _verbose=False):
         inputs = inputs.to(device)
         labels = labels.to(device)
         outputs = model(inputs)
-
         preds = torch.argmax(outputs, dim=1)
 
         total_predictions = np.append(total_predictions, preds.cpu().numpy())
@@ -514,7 +512,10 @@ def test_model(path, save_path, _verbose=False):
     metrics['total_labels'] = total_labels
 
     time_elapsed = time.time() - start_time
-    print('total preds', total_predictions)
+
+    if _verbose:
+        print('Elapsed time:', time_elapsed)
+
     return metrics
 
 
@@ -527,7 +528,7 @@ def save_model(state):
 
 
 def load_checkpoint(path):
-    return torch.load(path, map_location=torch.device('cpu'))
+    return torch.load(path, map_location='cpu')
 
 
 def get_information_from_checkpoint(checkpoint, plot=False, figsize=(14, 6)):
