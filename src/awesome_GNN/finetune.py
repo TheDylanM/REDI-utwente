@@ -23,7 +23,7 @@ OCCLUSION_OPTIONS = [None, '0', '1', 'SOFTMAX', 'GAUSSIAN']
 DATA_PATH = '../../data'  # write to this variable when importing this module from different directory context than assumed here
 FINETUNED_MODELS_PATH = os.path.join(DATA_PATH,
                                      'finetuned_models')  # Path to save the finedtuned models, relative to the global path
-DATASET = 'StanfordCars'  # write to this variable if you wish to use another dataset
+DATASET = 'FGVC-Aircraft'  # write to this variable if you wish to use another dataset
 
 # hyperparams/parameters that need defining or tuning
 CLASSIFIER_NAME = 'resnet'
@@ -31,7 +31,7 @@ CLASSIFIER_INPUT_SIZE = None
 BATCH_SIZE = 8
 NUM_EPOCHS = 15
 # NUM_CLASSES = 0
-FEATURE_EXTRACT = True
+FEATURE_EXTRACT = False
 OPTIMIZER_NAME = 'adam'
 LR = 0.001
 MOMENTUM = 0.9
@@ -133,13 +133,18 @@ def set_parameter_requires_grad(model, feature_extracting):
             param.requires_grad = False
 
 
-def initialize_model(model_name=CLASSIFIER_NAME, use_pretrained=True, _verbose=True):
+def initialize_model(use_pretrained=True, _verbose=True):
+    model_name = CLASSIFIER_NAME
     num_classes = get_num_classes()
     feature_extract = FEATURE_EXTRACT
     # Initialize these variables which will be set in this if statement. Each of these
     #   variables is model specific.
     model_ft = None
     input_size = 0
+
+    if _verbose:
+        print(f'initializing model: {model_name}')
+
     if not model_name in CLASSIFIER_OPTIONS:
         raise Exception(
             f'Invalid classifier name "{model_name}".\nPlease use one of the following: {CLASSIFIER_OPTIONS}')
@@ -580,7 +585,7 @@ def format_model_path(name, dataset, epoch):
 
 
 def get_model_architecture(name, _verbose=False):
-    return initialize_model(name, use_pretrained=False, _verbose=_verbose)
+    return initialize_model(name, use_pretrained=True, _verbose=_verbose)
 
 
 def write_to_file(path, content):
