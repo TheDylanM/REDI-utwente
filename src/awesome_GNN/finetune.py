@@ -15,9 +15,11 @@ from pytorch_grad_cam import GradCAM, ScoreCAM, GradCAMPlusPlus, AblationCAM, XG
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 from pytorch_grad_cam.utils.image import show_cam_on_image
 
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 CLASSIFIER_OPTIONS = ['resnet', 'alexnet', 'vgg', 'squeezenet', 'densenet', 'inception']
 DATASET_OPTIONS = ['StanfordCars', 'FGVC-Aircraft']  # todo: add options
+OCCLUSION_OPTIONS = [None, '0', '1', 'GAUSSIAN', 'SOFTMAX']
 
 DATA_PATH = '../../data'  # write to this variable when importing this module from different directory context than assumed here
 FINETUNED_MODELS_PATH = os.path.join(DATA_PATH,
@@ -34,14 +36,13 @@ FEATURE_EXTRACT = True
 OPTIMIZER_NAME = 'adam'
 LR = 0.001
 MOMENTUM = 0.9
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 ADAM_LR = 0.00005
 ADAM_BETA_ONE = 0.9
 ADAM_BETA_TWO = 0.999
 ADAM_EPSILON = 0.0000007
 OCCLUSION_PROBABILITY = 0.25
 OCCLUSION_THRESHOLD = 0.85
-OCCLUSION_NAME = None  # name for the type of occlusion used. options are: '0', '1', 'GAUSSIAN',
+OCCLUSION_NAME = None  # name for the type of occlusion used. options are listed above
 
 BASICALLY_INFINITY = 10000
 
@@ -511,12 +512,14 @@ def safe_mkdir(path, _verbose=False):
             print('cannot safely create', path)
 
 
-def format_model_path(name, dataset, epoch):
+def format_model_path(name, dataset, epoch, occlusion_name=None):
+    if occlusion_name is None:
+        occlusion_name = OCCLUSION_NAME
     path = os.path.join(FINETUNED_MODELS_PATH, dataset, name, '')
-    if OCCLUSION_NAME is None:
+    if occlusion_name is None:
         return path + str('{}_{}_E{}.pth'.format(name, dataset, epoch))
     else:
-        return path + str('{}_{}_E{}_occ{}.pth'.format(name, dataset, epoch, OCCLUSION_NAME))
+        return path + str('{}_{}_E{}_occ{}.pth'.format(name, dataset, epoch, occlusion_name))
 
 
 def get_model_architecture(name, _verbose=False):
