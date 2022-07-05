@@ -5,3 +5,4 @@ torchvision
 scipy
 tqdm
 grad-cam
+sklearn

@@ -19,7 +19,7 @@ from pytorch_grad_cam.utils.image import show_cam_on_image
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 CLASSIFIER_OPTIONS = ['resnet', 'alexnet', 'vgg', 'squeezenet', 'densenet', 'inception']
-DATASET_OPTIONS = ['StanfordCars', 'FGVC-Aircraft']  # todo: add options
+DATASET_OPTIONS = ['StanfordCars', 'FGVC-Aircraft']
 OCCLUSION_OPTIONS = [None, '0', '1', 'GAUSSIAN', 'SOFTMAX']
 
 DATA_PATH = '../../data'  # write to this variable when importing this module from different directory context than assumed here
@@ -37,7 +37,7 @@ FEATURE_EXTRACT = False
 OPTIMIZER_NAME = 'adam'
 LR = 0.001
 MOMENTUM = 0.9
-ADAM_LR = 0.00005
+ADAM_LR = 0.0001
 ADAM_BETA_ONE = 0.9
 ADAM_BETA_TWO = 0.999
 ADAM_EPSILON = 0.0000007
@@ -85,27 +85,53 @@ def get_num_classes():
     }[DATASET]
 
 
-def get_data_transforms():
-    # todo if relevant: adapt this per dataset?
+def get_classifier_input_size():
     return {
-        'train': transforms.Compose([
-            transforms.RandomResizedCrop(CLASSIFIER_INPUT_SIZE),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-        ]),
-        'val': transforms.Compose([
-            transforms.Resize(CLASSIFIER_INPUT_SIZE),
-            transforms.CenterCrop(CLASSIFIER_INPUT_SIZE),
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-        ]),
-        'test': transforms.Compose([
-            transforms.RandomResizedCrop(CLASSIFIER_INPUT_SIZE),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-        ])
+        'resnet': 224,
+        'alexnet': 224,
+        'vgg': 224,
+        'squeezenet': 224,
+        'densenet': 224,
+        'inception': 299,
+    }[CLASSIFIER_NAME]
+
+
+def get_data_transforms():
+    channel_distributions = {
+        'StanfordCars': {
+            'means': [0.4593, 0.4466, 0.4453],
+            'stddevs': [0.2919, 0.2910, 0.2988]
+        },
+        'FGVC-Aircraft': {
+            'means': [0.4842, 0.5142, 0.5346],
+            'stddevs': [0.2251, 0.2185, 0.2495]
+        }
+    } # distributions are based on train sets, see rgb_channel_normalization.ipynb
+    channel_means = channel_distributions[DATASET]['means']
+    channel_stddevs = channel_distributions[DATASET]['stddevs']
+    input_size = get_classifier_input_size()
+    final_transforms = [
+        transforms.ToTensor(),
+        transforms.Normalize(channel_means, channel_stddevs)
+    ]
+    default_transforms = [
+        transforms.Resize(input_size),
+        transforms.CenterCrop(input_size),
+        *final_transforms
+    ]
+    training_transforms = [
+        transforms.Resize(input_size),
+        transforms.RandomCrop(input_size),
+        transforms.RandomHorizontalFlip(),
+        *final_transforms
+
+    ]
+    default_transforms = transforms.Compose(default_transforms)
+    training_transforms = transforms.Compose(training_transforms)
+    return {
+        'train': training_transforms,
+        'val': default_transforms,
+        'test': default_transforms,
     }
 
 
@@ -134,8 +160,9 @@ def set_parameter_requires_grad(model, feature_extracting):
             param.requires_grad = False
 
 
-def initialize_model(use_pretrained=True, _verbose=True):
-    model_name = CLASSIFIER_NAME
+def initialize_model(model_name=None, use_pretrained=True, _verbose=True):
+    if model_name is None:
+        model_name = CLASSIFIER_NAME
     num_classes = get_num_classes()
     feature_extract = FEATURE_EXTRACT
     # Initialize these variables which will be set in this if statement. Each of these
@@ -588,7 +615,7 @@ def format_model_path(name, dataset, epoch, occlusion_name=None):
 
 
 def get_model_architecture(name, _verbose=False):
-    return initialize_model(name, use_pretrained=True, _verbose=_verbose)
+    return initialize_model(model_name=name, use_pretrained=True, _verbose=_verbose)
 
 
 def write_to_file(path, content):
