@@ -249,6 +249,11 @@ def get_target_layers(classifier):
     target_layers = []
     if type(classifier) == models.ResNet:  # todo: more models
         target_layers = [classifier.layer4[-1]]
+    elif type(classifier) == models.DenseNet:
+        target_layers = [classifier.features.denseblock4.denselayer16]
+    elif type(classifier) == models.VGG:
+        # print(classifier)
+        target_layers = [classifier.features[-1]]
     return target_layers
 
 
