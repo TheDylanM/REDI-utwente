@@ -37,7 +37,7 @@ FEATURE_EXTRACT = False
 OPTIMIZER_NAME = 'adam'
 LR = 0.001
 MOMENTUM = 0.9
-ADAM_LR = 0.0001
+ADAM_LR = 0.00005
 ADAM_BETA_ONE = 0.9
 ADAM_BETA_TWO = 0.999
 ADAM_EPSILON = 0.0000007
@@ -106,24 +106,22 @@ def get_data_transforms():
             'means': [0.4842, 0.5142, 0.5346],
             'stddevs': [0.2251, 0.2185, 0.2495]
         }
-    } # distributions are based on train sets, see rgb_channel_normalization.ipynb
+    }  # distributions are based on train sets, see rgb_channel_normalization.ipynb
     channel_means = channel_distributions[DATASET]['means']
     channel_stddevs = channel_distributions[DATASET]['stddevs']
     input_size = get_classifier_input_size()
-    final_transforms = [
-        transforms.ToTensor(),
-        transforms.Normalize(channel_means, channel_stddevs)
-    ]
     default_transforms = [
         transforms.Resize(input_size),
         transforms.CenterCrop(input_size),
-        *final_transforms
+        transforms.ToTensor(),
+        transforms.Normalize(channel_means, channel_stddevs),
     ]
     training_transforms = [
         transforms.Resize(input_size),
         transforms.RandomCrop(input_size),
         transforms.RandomHorizontalFlip(),
-        *final_transforms
+        transforms.ToTensor(),
+        transforms.Normalize(channel_means, channel_stddevs),
 
     ]
     default_transforms = transforms.Compose(default_transforms)
@@ -283,14 +281,16 @@ def apply_occlusion(inputs, model):
 
     if OCCLUSION_NAME == '0' or OCCLUSION_NAME == '1':
         mask = threshold_mask(grayscale_cams)
-        inputs = inputs * mask
+        inputs = torch.multiply(inputs, mask)
         if OCCLUSION_NAME == '1':
             inputs += 1 - mask
-    if OCCLUSION_NAME == 'GAUSSIAN':
+        # if OCCLUSION_NAME == '0':
+        #     inputs += mask - 1
+    elif OCCLUSION_NAME == 'GAUSSIAN':
         mask = threshold_mask(grayscale_cams)
         smoothed_inputs = gaussian_smoothing(inputs)
         inputs = inputs * mask + smoothed_inputs * (1 - mask)
-    if OCCLUSION_NAME == 'SOFTMAX':
+    elif OCCLUSION_NAME == 'SOFTMAX':
         mask = softmax_mask(grayscale_cams)
         inputs = inputs * mask
     return inputs
@@ -340,7 +340,7 @@ def train_model(model,
                 labels = labels.to(device)
 
                 if phase == 'train' and OCCLUSION_NAME is not None:
-                    # Apply occlusion to only half of the batches
+                    # Apply occlusion to only part of the batches
                     if np.random.rand(1)[0] <= OCCLUSION_PROBABILITY:
                         inputs = apply_occlusion(inputs, model)
 
