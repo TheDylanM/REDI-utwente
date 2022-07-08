@@ -247,6 +247,11 @@ def get_target_layers(classifier):
     target_layers = []
     if type(classifier) == models.ResNet:  # todo: more models
         target_layers = [classifier.layer4[-1]]
+    elif type(classifier) == models.DenseNet:
+        target_layers = [classifier.features.denseblock4.denselayer16]
+    elif type(classifier) == models.VGG:
+        # print(classifier)
+        target_layers = [classifier.features[-1]]
     return target_layers
 
 
@@ -270,13 +275,14 @@ def gaussian_smoothing(inputs):
     return gaussian_filter(inputs)
 
 
-def apply_occlusion(inputs, model):
+def apply_occlusion(inputs, labels, model):
     target_layers = get_target_layers(model)
 
     # by using 'with', the cam object is properly opened and closed
     with GradCAM(model=model, target_layers=target_layers, use_cuda=True) as cam:
         # You can also pass aug_smooth=True and eigen_smooth=True, to apply smoothing.
-        grayscale_cams = cam(input_tensor=inputs)
+        targets = [ClassifierOutputTarget(l) for l in labels.tolist()]
+        grayscale_cams = cam(input_tensor=inputs, targets=targets)
         grayscale_cams = torch.tensor(grayscale_cams).to(device)
 
     if OCCLUSION_NAME == '0' or OCCLUSION_NAME == '1':
@@ -342,7 +348,7 @@ def train_model(model,
                 if phase == 'train' and OCCLUSION_NAME is not None:
                     # Apply occlusion to only part of the batches
                     if np.random.rand(1)[0] <= OCCLUSION_PROBABILITY:
-                        inputs = apply_occlusion(inputs, model)
+                        inputs = apply_occlusion(inputs, labels, model)
 
                 # zero the parameter gradients
                 optimizer.zero_grad()
@@ -502,54 +508,69 @@ def finetune_model(model,
 
 def test_model(path, _verbose=False):
     state = load_checkpoint(path)
+    if state is not None:
 
-    # Read properties from the loaded checkpoint state
-    model_name = state['name']
-    epochs = state['epochs']
-    occlusion = state['occlusion']
+        # Read properties from the loaded checkpoint state
+        model_name = state['name']
+        epochs = state['epochs']
+        occlusion = state['occlusion']
+        dataset = DATASET
 
-    if _verbose:
-        print(f'name:      {model_name} \n'
-              f'epochs:    {epochs} \n'
-              f'occlusion: {occlusion}\n'
-              f'--------------------------')
+        if _verbose:
+            print(f'name: {model_name} epochs: {epochs} occlusion: {occlusion} dataset:   {dataset}')
 
-    # Load model
-    model = get_model_architecture(model_name)
-    model.load_state_dict(state['model_state_dict'])
-    model.eval()
+        # Load model
+        model = get_model_architecture(model_name)
+        model.load_state_dict(state['model_state_dict'])
+        model.eval()
 
-    test_dataloader = get_dataloaders(['test'])['test']
+        test_dataloader = get_dataloaders(['test'])['test']
 
-    total_predictions = []
-    total_labels = []
-    start_time = time.time()
+        total_predictions = []
+        total_labels = []
+        start_time = time.time()
 
-    # Iterate over data.
-    # tqdm_obj = tqdm.tqdm(test_dataloader)
-    # tqdm_obj.set_description(desc=f'Epoch {epoch}/{num_epochs - 1} {phase}')
+        # Iterate over data.
+        # tqdm_obj = tqdm.tqdm(test_dataloader)
+        # tqdm_obj.set_description(desc=f'Epoch {epoch}/{num_epochs - 1} {phase}')
 
-    # Testing loop
-    for (inputs, labels) in tqdm.tqdm(test_dataloader):
-        inputs = inputs.to(device)
-        labels = labels.to(device)
-        outputs = model(inputs)
-        preds = torch.argmax(outputs, dim=1)
+        total_samples = 0
+        gradcam_kurtosis = 0
+        gradcam_stddev = 0
+        with GradCAM(model=model, target_layers=get_target_layers(model), use_cuda=True) as cam:
+            for (inputs, labels) in tqdm.tqdm(test_dataloader):
+                inputs = inputs.to(device)
+                labels = labels.to(device)
+                outputs = model(inputs)
+                preds = torch.argmax(outputs, dim=1)
 
-        total_predictions = np.append(total_predictions, preds.cpu().numpy())
-        total_labels = np.append(total_labels, labels.cpu().numpy())
+                total_predictions = np.append(total_predictions, preds.cpu().numpy())
+                total_labels = np.append(total_labels, labels.cpu().numpy())
 
-    # Save these metrics, including the predicted and labels with it
-    metrics = calculate_metrics(total_predictions, total_labels)
-    metrics['total_predicted'] = total_predictions
-    metrics['total_labels'] = total_labels
+                targets = [ClassifierOutputTarget(l) for l in labels.tolist()]
+                grayscale_cams = cam(input_tensor=inputs, targets=targets)
+                grayscale_cams = torch.tensor(grayscale_cams).to(device)
+                gradcam_kurtosis += kurtosis(grayscale_cams).item() * len(labels)
+                gradcam_stddev += stddev(grayscale_cams).item() * len(labels)
+                total_samples += len(labels)
+                print(total_samples)
+        gradcam_kurtosis = gradcam_kurtosis / total_samples
+        gradcam_stddev = gradcam_stddev / total_samples
 
-    time_elapsed = time.time() - start_time
+        # Save these metrics, including the predicted and labels with it
+        metrics = calculate_metrics(total_predictions, total_labels)
+        metrics['total_predicted'] = total_predictions
+        metrics['total_labels'] = total_labels
+        metrics['gradcam_stddev'] = gradcam_stddev
+        metrics['gradcam_kurtosis'] = gradcam_kurtosis
 
-    if _verbose:
-        print('Elapsed time:', time_elapsed)
+        time_elapsed = time.time() - start_time
 
-    return metrics
+        if _verbose:
+            print('Elapsed time:', time_elapsed)
+
+        return metrics
+    return None
 
 
 def save_model(state):
@@ -561,7 +582,10 @@ def save_model(state):
 
 
 def load_checkpoint(path):
-    return torch.load(path, map_location='cpu')
+    try:
+        return torch.load(path, map_location='cpu')
+    except FileNotFoundError:
+        return None
 
 
 def get_information_from_checkpoint(checkpoint, plot=False, figsize=(14, 6)):
@@ -651,3 +675,16 @@ def recall(preds, labels):
 
 def f1(preds, labels):
     return f1_score(labels, preds, average='weighted', zero_division=0)
+
+
+def kurtosis(cam_batch):
+    deviations = cam_batch - torch.mean(cam_batch, (-1, -2))[:, :, None, None]
+    squared_squared_deviations = torch.square(torch.square(deviations))
+    std_devs = torch.std(cam_batch, (-1, -2))[:, :, None, None]
+    scaled_squared_squared_deviations = torch.divide(squared_squared_deviations, torch.pow(std_devs,4))
+    return torch.mean(scaled_squared_squared_deviations)
+
+def stddev(cam_batch):
+    # calculates the average standard deviation of a batch of class activation mappings
+    stds = torch.std(cam_batch, tuple(range(1, len(cam_batch.shape))))
+    return torch.mean(stds)
