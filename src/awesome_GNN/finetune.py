@@ -512,12 +512,10 @@ def test_model(path, _verbose=False):
     model_name = state['name']
     epochs = state['epochs']
     occlusion = state['occlusion']
+    dataset = DATASET
 
     if _verbose:
-        print(f'name:      {model_name} \n'
-              f'epochs:    {epochs} \n'
-              f'occlusion: {occlusion}\n'
-              f'--------------------------')
+        print(f'name: {model_name} epochs: {epochs} occlusion: {occlusion} dataset:   {dataset}')
 
     # Load model
     model = get_model_architecture(model_name)
